@@ -139,6 +139,7 @@ class Renderer(object):
         glUniformMatrix4fv(0, 1, GL_FALSE, self._plane_model.flatten())
         glUniformMatrix4fv(1, 1, GL_FALSE, (self._plane_model * self.camera.view_projection).flatten())
         glUniform1f(2, 0.25)
+
         self.plane.draw()
 
         # Stencil reflection
@@ -207,6 +208,12 @@ class Renderer(object):
         elif key == b'd':
             self.camera.move(numpy.array([-1, 0, 0]))
             self.camera.look_at(numpy.array([0, 0, 0]))
+
+        # Wireframe / Solid etc
+        elif key == b'1':
+            glPolygonMode(GL_FRONT_AND_BACK, GL_LINE)
+        elif key == b'2':
+            glPolygonMode(GL_FRONT_AND_BACK, GL_FILL)
 
         # No redraw
         else:
