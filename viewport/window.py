@@ -30,7 +30,6 @@ class Window(object):
         self._last_drag_x = 0
         self._last_drag_y = 0
 
-
     def run(self):
         glutInit()
         glutInitDisplayMode(GLUT_RGBA|GLUT_DEPTH|GLUT_STENCIL|GLUT_DOUBLE)

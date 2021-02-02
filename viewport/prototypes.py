@@ -41,7 +41,6 @@ CUBE_INDICES = numpy.array([
 ], dtype=numpy.uint32)
 
 
-
 # Plane
 
 PUV_PLANE_VERTICES = numpy.array([

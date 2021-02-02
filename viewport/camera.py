@@ -46,7 +46,6 @@ class Camera(object):
         self._projection = None
         self._view_projection = None
 
-
     @property
     def view(self):
         if self._view is None:

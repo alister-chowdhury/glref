@@ -61,7 +61,6 @@ class Renderer(object):
         self.cube = None
         self.plane = None
 
-
     def run(self):
         self.window.run()
 
@@ -214,6 +213,11 @@ class Renderer(object):
             glPolygonMode(GL_FRONT_AND_BACK, GL_LINE)
         elif key == b'2':
             glPolygonMode(GL_FRONT_AND_BACK, GL_FILL)
+
+        elif key == b'n':
+            self._cube_model[3,1] += 1
+        elif key == b'm':
+            self._cube_model[3,1] -= 1
 
         # No redraw
         else:
