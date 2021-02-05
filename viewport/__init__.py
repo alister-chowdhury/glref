@@ -1,6 +1,6 @@
 
 from . camera import Camera
-from . geometry import StaticGeometry
+from . geometry import StaticGeometry, StaticCombinedGeometry
 from . program import generate_shader_program
 from . window import Window
 
