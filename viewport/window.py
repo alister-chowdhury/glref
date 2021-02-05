@@ -31,6 +31,9 @@ class Window(object):
         self._last_drag_y = 0
 
     def run(self):
+        glutInitContextVersion(4, 6)
+        glutInitContextProfile(GLUT_CORE_PROFILE)
+        glutInitContextFlags(GLUT_FORWARD_COMPATIBLE)
         glutInit()
         glutInitDisplayMode(GLUT_RGBA|GLUT_DEPTH|GLUT_STENCIL|GLUT_DOUBLE)
         glutInitWindowSize(self.width, self.height)

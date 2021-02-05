@@ -47,6 +47,10 @@ class Camera(object):
         self._view_projection = None
 
     @property
+    def eye(self):
+        return self._eye
+
+    @property
     def view(self):
         if self._view is None:
             tx = self._right.dot(self._eye)
