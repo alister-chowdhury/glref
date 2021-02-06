@@ -197,7 +197,7 @@ class Renderer(object):
         )
 
         # Generate model matrices and bboxes
-        self._buffer_objects = (ctypes.c_long * 2)()
+        self._buffer_objects = (ctypes.c_int * 2)()
         glCreateBuffers(2, self._buffer_objects)
         self._bboxes = self._buffer_objects[0]
         self._models = self._buffer_objects[1]

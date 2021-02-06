@@ -26,8 +26,8 @@ class StaticGeometry(object):
         assert(len(indices.ravel()) % 3 == 0)
         assert(len(vertices.ravel()) % vertex_float_count == 0)
 
-        self._vbo_ibo_ptr = (ctypes.c_long * 2)()
-        self._vao_ptr = ctypes.c_long()
+        self._vbo_ibo_ptr = (ctypes.c_int * 2)()
+        self._vao_ptr = ctypes.c_int()
         glCreateBuffers(2, self._vbo_ibo_ptr)
         glCreateVertexArrays(1, self._vao_ptr)
         
@@ -122,8 +122,8 @@ class StaticCombinedGeometry(object):
         assert(len(combined_vertices.ravel()) % vertex_float_count == 0)
 
         # Really we could be storing these in the same buffer
-        self._buffers = (ctypes.c_long * 4)()
-        self._vao_ptr = ctypes.c_long()
+        self._buffers = (ctypes.c_int * 4)()
+        self._vao_ptr = ctypes.c_int()
         glCreateBuffers(4, self._buffers)
         glCreateVertexArrays(1, self._vao_ptr)
 
