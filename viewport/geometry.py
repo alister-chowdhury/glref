@@ -159,6 +159,11 @@ class StaticCombinedGeometry(object):
             glVertexArrayAttribBinding(self._vao, idx, 0)
             offset += 4 * count
 
+        # So while attempting to work around intels gl_DrawID being a bit odd and trying
+        # to use: https://www.g-truc.net/post-0518.html
+        # Simply enabling an extra attrib magically fixes it for reasons I am unsure of.
+        glEnableVertexArrayAttrib(self._vao, len(vertex_attrib_sizes))
+
         self.index_counts = counts
 
     def bind(self):
@@ -174,4 +179,4 @@ class StaticCombinedGeometry(object):
         """Cleanup data."""
         if self._cleanup:
             glDeleteVertexArrays(1, self._vao_ptr)
-            glDeleteBuffers(4, self._buffers)
+            glDeleteBuffers(5, self._buffers)

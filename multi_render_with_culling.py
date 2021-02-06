@@ -57,11 +57,11 @@ void main() {
 FRUSTUM_CULLING_SOURCE = """
 #version 460 core
 
-layout(local_size_x=64) in;
+layout(local_size_x=1) in;
 
 
 layout(location = 0) uniform mat4 viewProjection;
-
+readonly layout(std430, binding = 0) buffer models_ { mat4 models[];};
 
 /*
     typedef  struct {
@@ -72,13 +72,11 @@ layout(location = 0) uniform mat4 viewProjection;
         uint  baseInstance;
     } DrawElementsIndirectCommand;
 */
-readonly layout(std430, binding = 0) buffer models_ { mat4 models[];};
 writeonly layout(std430, binding = 1) buffer draw_elements_command_ { uint draw_elements_command[];};
 
 /*
     typedef  struct {
-        vec4  a, b, c, d;
-        vec4  e, f, g, h;
+        vec4  mins, maxs;
     } BBox3d;
 */
 readonly layout(std430, binding = 2) buffer bboxs_ { vec4 bboxs[];};
