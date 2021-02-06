@@ -242,7 +242,7 @@ class Renderer(object):
         wnd.redraw()
 
 
-    def _drag(self, wnd, x, y):
+    def _drag(self, wnd, x, y, button):
         # Move the cube around
         deriv_u = x / wnd.width
         deriv_v = y / wnd.height

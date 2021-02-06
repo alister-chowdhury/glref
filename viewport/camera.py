@@ -51,6 +51,26 @@ class Camera(object):
         return self._eye
 
     @property
+    def right(self):
+        return self._right
+
+    @property
+    def up(self):
+        return self._up
+
+    @property
+    def forward(self):
+        return self._forward
+
+    @property
+    def orthonormal_basis(self):
+        return numpy.matrix([
+            [self._right[0], self._up[0], self._forward[0]],
+            [self._right[1], self._up[1], self._forward[1]],
+            [self._right[2], self._up[2], self._forward[2]],
+        ], dtype=numpy.float32)
+
+    @property
     def view(self):
         if self._view is None:
             tx = self._right.dot(self._eye)
@@ -92,6 +112,17 @@ class Camera(object):
 
     def move(self, xyz):
         self._eye = self._eye + xyz
+        self._view = None
+        self._view_projection = None
+
+    def move_local(self, xyz):
+        self.move(numpy.asarray(-xyz * self.orthonormal_basis.T).flat)
+
+    def append_3x3_transform(self, T):
+        self._eye = numpy.asarray(self._eye * T).flatten()
+        self._right = numpy.asarray(self._right * T).flatten()
+        self._up = numpy.asarray(self._up * T).flatten()
+        self._forward = numpy.asarray(self._forward * T).flatten()
         self._view = None
         self._view_projection = None
 

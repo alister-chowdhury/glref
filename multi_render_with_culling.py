@@ -273,18 +273,14 @@ class Renderer(object):
     def _keypress(self, wnd, key, x, y):
         # Move the camera
         if key == b'w':
-            self.camera.move(numpy.array([0, 1, 0]))
-            self.camera.look_at(numpy.array([0, 0, 0]))
+            self.camera.move_local(numpy.array([0, 0, 1]))
         elif key == b's':
-            self.camera.move(numpy.array([0, -1, 0]))
-            self.camera.look_at(numpy.array([0, 0, 0]))
+            self.camera.move_local(numpy.array([0, 0, -1]))
 
         elif key == b'a':
-            self.camera.move(numpy.array([1, 0, 0]))
-            self.camera.look_at(numpy.array([0, 0, 0]))
+            self.camera.move_local(numpy.array([1, 0, 0]))
         elif key == b'd':
-            self.camera.move(numpy.array([-1, 0, 0]))
-            self.camera.look_at(numpy.array([0, 0, 0]))
+            self.camera.move_local(numpy.array([-1, 0, 0]))
 
         # Wireframe / Solid etc
         elif key == b'1':
@@ -298,16 +294,42 @@ class Renderer(object):
 
         wnd.redraw()
 
-    def _drag(self, wnd, x, y):
-        deriv_u = x / wnd.width * 20
-        deriv_v = y / wnd.height * -20
+    def _drag(self, wnd, x, y, button):
+        deriv_u = x / wnd.width
+        deriv_v = y / wnd.height
 
-        view = self.camera.view
+        sin_u = sin(deriv_u * pi)
+        cos_u = cos(deriv_u * pi)
+        sin_v = sin(deriv_v * pi)
+        cos_v = cos(deriv_v * pi)
 
-        X = numpy.array(view.T[0]).flatten()[0:3] * deriv_u
-        Y = numpy.array(view.T[1]).flatten()[0:3] * deriv_v
+        ortho = self.camera.orthonormal_basis
+        
+        # Y
+        M = numpy.matrix([
+            [cos_u, 0, sin_u],
+            [0, 1, 0],
+            [-sin_u, 0, cos_u],
+        ])
 
-        self.camera.move(X + Y)
+        # XY stuff
+        if button == wnd.RIGHT:
+            N = numpy.matrix([
+                [cos_v, -sin_v, 0],
+                [sin_v, cos_v, 0],
+                [0, 0, 1],
+            ])
+            N = ortho.I * N * ortho
+        else:
+            N = numpy.matrix([
+                [1, 0, 0],
+                [0, cos_v, -sin_v],
+                [0, sin_v, cos_v],
+            ])
+            N = ortho * N * ortho.I
+        M *= N
+
+        self.camera.append_3x3_transform(M)
 
         wnd.redraw()
 

@@ -78,6 +78,7 @@ class Window(object):
         if self.on_drag and state == self.DOWN:
             self._last_drag_x = x
             self._last_drag_y = y
+            self._mouse_button = button
 
         if self.on_mouse:
             self.on_mouse(self, button, state, x, y)
@@ -86,6 +87,6 @@ class Window(object):
         if self.on_drag:
             deriv_x = x - self._last_drag_x
             deriv_y = y - self._last_drag_y
-            self.on_drag(self, deriv_x, deriv_y)
+            self.on_drag(self, deriv_x, deriv_y, self._mouse_button)
             self._last_drag_x = x
             self._last_drag_y = y
