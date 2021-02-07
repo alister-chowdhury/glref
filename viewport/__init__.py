@@ -1,7 +1,10 @@
 
 from . camera import Camera
 from . geometry import StaticGeometry, StaticCombinedGeometry
-from . program import generate_shader_program
+from . program import (
+    generate_shader_program,
+    generate_shader_program_from_files
+)
 from . window import Window
 
 from . misc import make_reflection_matrix

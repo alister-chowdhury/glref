@@ -73,8 +73,8 @@ class Camera(object):
     @property
     def view(self):
         if self._view is None:
-            tx = self._right.dot(self._eye)
-            ty = self._up.dot(self._eye)
+            tx = -self._right.dot(self._eye)
+            ty = -self._up.dot(self._eye)
             tz = -self._forward.dot(self._eye)
 
             self._view = numpy.matrix([
@@ -118,8 +118,9 @@ class Camera(object):
     def move_local(self, xyz):
         self.move(numpy.asarray(-xyz * self.orthonormal_basis.T).flat)
 
-    def append_3x3_transform(self, T):
-        self._eye = numpy.asarray(self._eye * T).flatten()
+    def append_3x3_transform(self, T, eye=False):
+        if eye:
+            self._eye = numpy.asarray(self._eye * T).flatten()
         self._right = numpy.asarray(self._right * T).flatten()
         self._up = numpy.asarray(self._up * T).flatten()
         self._forward = numpy.asarray(self._forward * T).flatten()

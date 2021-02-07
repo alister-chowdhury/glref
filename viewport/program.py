@@ -32,6 +32,22 @@ def build_shader(source, shader_type=GL_VERTEX_SHADER):
     return shader_id
 
 
+def generate_shader_program_from_files(**shader_type_source):
+    """Generate a shader_program.
+
+    Usage:
+        generate_shader_program_from_files(
+            GL_VERTEX_SHADER = vertex_filepath,
+            GL_FRAGMENT_SHADER = frag_filepath,
+        )
+    """
+    data = {}
+    for shader_type, filepath in shader_type_source.items():
+        with open(filepath, "r") as fp:
+            data[shader_type_name] = fp.read()
+    return generate_shader_program(**data)
+
+
 def generate_shader_program(**shader_type_source):
     """Generate a shader_program.
 

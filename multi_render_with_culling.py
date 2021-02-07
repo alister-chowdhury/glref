@@ -319,7 +319,7 @@ class Renderer(object):
                 [sin_v, cos_v, 0],
                 [0, 0, 1],
             ])
-            N = ortho.I * N * ortho
+            N = ortho * N * ortho.I
         else:
             N = numpy.matrix([
                 [1, 0, 0],
