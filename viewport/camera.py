@@ -5,9 +5,7 @@ import numpy
 __all__ = ("Camera",)
 
 
-def make_perspective_matrix(aspect, fov=90.0):
-    near = 0.05
-    far = 1000
+def make_perspective_matrix(aspect, near=0.05, far=1000, fov=90.0):
     top = near * tan(0.5 * radians(fov))
     bottom = -top
     right = top * aspect
@@ -46,6 +44,9 @@ class Camera(object):
         self._projection = None
         self._view_projection = None
 
+        self._near = 0.05
+        self._far = 1000
+
     @property
     def eye(self):
         return self._eye
@@ -61,6 +62,26 @@ class Camera(object):
     @property
     def forward(self):
         return self._forward
+
+    @property
+    def near(self):
+        return self._near
+
+    @near.setter
+    def near(self, new_value):
+        self._near = new_value
+        self._projection = None
+        self._view_projection = None
+
+    @property
+    def far(self):
+        return self._far
+
+    @far.setter
+    def far(self, new_value):
+        self._far = new_value
+        self._projection = None
+        self._view_projection = None
 
     @property
     def orthonormal_basis(self):
@@ -90,7 +111,10 @@ class Camera(object):
     def projection(self):
         if self._projection is None:
             self._projection = make_perspective_matrix(
-                self._aspect, self._fov
+                self._aspect,
+                near=self._near,
+                far=self._far,
+                fov=self._fov
             )
         return self._projection
 

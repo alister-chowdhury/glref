@@ -47,13 +47,67 @@ VOLUMEBOX_VERTEX_SHADER_SOURCE = """
 #version 460 core
 layout(location = 0) out vec2 uv;
 
+
+layout(location = 0) uniform vec3 P0;
+layout(location = 1) uniform vec3 P1;
+layout(location = 2) uniform mat4 viewPerspective;
+layout(location = 3) uniform mat4 inversePerspective;
+layout(location = 4) uniform mat4 inverseView;
+layout(location = 5) uniform vec3 eye;
+
+
+
+vec4 getScreenBbox(vec4 bboxA, vec4 bboxB)
+{
+    mat4 bboxBlockA = viewPerspective * mat4(
+        bboxA,
+        vec4(bboxA.x, bboxB.yzw),
+        vec4(bboxA.xy, bboxB.zw),
+        vec4(bboxA.x, bboxB.y, bboxA.zw)
+    );
+    bboxBlockA[0] /= bboxBlockA[0].w;
+    bboxBlockA[1] /= bboxBlockA[1].w;
+    bboxBlockA[2] /= bboxBlockA[2].w;
+    bboxBlockA[3] /= bboxBlockA[3].w;
+
+    mat4 bboxBlockB = viewPerspective * mat4(
+        bboxB,
+        vec4(bboxB.x, bboxA.yzw),
+        vec4(bboxB.xy, bboxA.zw),
+        vec4(bboxB.x, bboxA.y, bboxB.zw)
+    );
+    bboxBlockB[0] /= bboxBlockB[0].w;
+    bboxBlockB[1] /= bboxBlockB[1].w;
+    bboxBlockB[2] /= bboxBlockB[2].w;
+    bboxBlockB[3] /= bboxBlockB[3].w;
+
+    vec2 xy_mins = min(
+        min(min(bboxBlockA[0].xy, bboxBlockA[1].xy), min(bboxBlockA[2].xy, bboxBlockA[3].xy)),
+        min(min(bboxBlockB[0].xy, bboxBlockB[1].xy), min(bboxBlockB[2].xy, bboxBlockB[3].xy))
+    );
+    vec2 xy_maxs = max(
+        max(max(bboxBlockA[0].xy, bboxBlockA[1].xy), max(bboxBlockA[2].xy, bboxBlockA[3].xy)),
+        max(max(bboxBlockB[0].xy, bboxBlockB[1].xy), max(bboxBlockB[2].xy, bboxBlockB[3].xy))
+    );
+
+    return vec4(xy_mins, xy_maxs);
+}
+
+
 void main() {
     uv = vec2(
         float(gl_VertexID % 2),
         float(gl_VertexID / 2)
     );
 
-    // TODO only draw within the boxs screen bounds
+    vec4 screenBbox = getScreenBbox(
+        vec4(P0, 1.0),
+        vec4(P1, 1.0)
+    );
+
+    uv = max(uv, (screenBbox.xy + 1.0) * 0.5);
+    uv = min(uv, (screenBbox.zw + 1.0) * 0.5);
+
     gl_Position = vec4(uv * 2.0 - 1.0, 0.0, 1.0);
 
 }
@@ -65,14 +119,63 @@ VOLUMEBOX_FRAGMENT_SHADER_SOURCE = """
 layout(binding = 0) uniform sampler2D renderedCol;
 layout(binding = 1) uniform sampler2D renderedDepth;
 
+
+layout(location = 0) uniform vec3 P0;
+layout(location = 1) uniform vec3 P1;
+layout(location = 2) uniform mat4 viewPerspective;
+layout(location = 3) uniform mat4 inversePerspective;
+layout(location = 4) uniform mat4 inverseView;
+layout(location = 5) uniform vec3 eye;
+
 layout(location = 0) in vec2 uv;
 layout(location = 0) out vec4 out_rgba;
 
-void main() {
-    vec4 d = texture(renderedDepth, uv);
-    float linearDistance = d.r/d.w;
+vec3 getWorldPos(float depth) {
+    vec4 clipSpaceP = vec4(
+        uv * 2.0 - 1.0,
+        depth * 2.0 - 1.0,
+        1.0
+    );
+    vec4 viewSpaceP = inversePerspective * clipSpaceP;
+    viewSpaceP /= viewSpaceP.w;
+    return (inverseView * viewSpaceP).xyz;
+}
 
-    out_rgba = vec4(pow(linearDistance, 10.0));
+void main() {
+    float depth = texture(renderedDepth, uv).x;
+    vec3 screenP = getWorldPos(depth);
+
+    vec3 direction = normalize(screenP - eye);
+    
+    vec3 t0 = (P0 - eye) / direction;
+    vec3 t1 = (P1 - eye) / direction;
+
+    vec3 tmin = min(t0, t1);
+    vec3 tmax = max(t0, t1);
+
+    float tnear = max(max(tmin.x, tmin.y), tmin.z);
+    float tfar = min(min(min(tmax.x, tmax.y), tmax.z), distance(eye, screenP));
+
+
+    if(tnear > tfar || tfar < 0)
+    {
+        discard;
+    }
+
+
+    vec3 intersectionStart = eye + direction * (tnear * float(tnear > 0.0));
+    vec3 intersectionEnd = eye + direction * tfar;
+
+    vec3 textureUvwStart = (intersectionStart - P0) / (P1 - P0);
+    vec3 textureUvwEnd = (intersectionEnd - P0) / (P1 - P0);
+
+    float density = distance(textureUvwEnd, textureUvwStart);
+
+
+    out_rgba = texture(renderedCol, uv) * (1.0-density);
+
+
+    //out_rgba = vec4(vec3(density), 1.0);
 }
 """
 
@@ -179,6 +282,12 @@ class Renderer(object):
         glUseProgram(self._draw_volume_program)
         glBindTextureUnit(0, self._framebuffer_col.texture)
         glBindTextureUnit(1, self._framebuffer_depth.texture)
+        glUniform3f(0, -2, -2, -2)
+        glUniform3f(1, 2, 2, 2)
+        glUniformMatrix4fv(2, 1, GL_FALSE, self.camera.view_projection.flatten())
+        glUniformMatrix4fv(3, 1, GL_FALSE, self.camera.projection.I.flatten())
+        glUniformMatrix4fv(4, 1, GL_FALSE, self.camera.view.I.flatten())
+        glUniform3f(5, self.camera.eye[0], self.camera.eye[1], self.camera.eye[2])
         glDrawArrays(GL_TRIANGLE_STRIP, 0, 4)
 
 
