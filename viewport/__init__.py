@@ -1,5 +1,6 @@
 
 from . camera import Camera
+from . framebuffer import Framebuffer, FramebufferTarget
 from . geometry import StaticGeometry, StaticCombinedGeometry
 from . program import (
     generate_shader_program,
