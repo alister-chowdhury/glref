@@ -34,7 +34,7 @@ class FramebufferTarget(object):
         # a texture.
         if make_texture and (self.is_depth or self.is_stencil or self.is_depth_stencil):
             if self.is_depth and pixel_type == GL_DEPTH_COMPONENT:
-                self.pixel_type = GL_DEPTH_COMPONENT16
+                self.pixel_type = GL_DEPTH_COMPONENT24
             elif self.is_stencil and pixel_type == GL_STENCIL_INDEX:
                 self.pixel_type = GL_STENCIL_INDEX8
             elif self.is_depth_stencil and pixel_type == GL_DEPTH_STENCIL:
@@ -153,13 +153,13 @@ class Framebuffer(object):
 
         self._intitialized = True
 
-    def blit_to_back(self, width, height):
+    def blit_to_back(self, width, height, mask=GL_COLOR_BUFFER_BIT, filter_=GL_LINEAR):
         glBlitNamedFramebuffer(
             self.value,
             0,  # GL_BACK
             0, 0, width, height,
             0, 0, width, height,
-            GL_COLOR_BUFFER_BIT,
-            GL_LINEAR
+            mask,
+            filter_
         )
 
