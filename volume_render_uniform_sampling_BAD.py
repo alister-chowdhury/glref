@@ -1,3 +1,5 @@
+# Don't evenly sample a volume, it scales horrifically, use raymarching instead
+
 from math import cos, sin, pi
 
 import numpy
@@ -118,7 +120,7 @@ VOLUMEBOX_FRAGMENT_SHADER_SOURCE = """
 
 layout(binding = 0) uniform sampler2D renderedCol;
 layout(binding = 1) uniform sampler2D renderedDepth;
-
+layout(binding = 2) uniform sampler3D volumeData;
 
 layout(location = 0) uniform vec3 P0;
 layout(location = 1) uniform vec3 P1;
@@ -126,6 +128,8 @@ layout(location = 2) uniform mat4 viewPerspective;
 layout(location = 3) uniform mat4 inversePerspective;
 layout(location = 4) uniform mat4 inverseView;
 layout(location = 5) uniform vec3 eye;
+layout(location = 6) uniform vec3 gridSize;
+
 
 layout(location = 0) in vec2 uv;
 layout(location = 0) out vec4 out_rgba;
@@ -162,20 +166,37 @@ void main() {
         discard;
     }
 
-
     vec3 intersectionStart = eye + direction * (tnear * float(tnear > 0.0));
     vec3 intersectionEnd = eye + direction * tfar;
 
     vec3 textureUvwStart = (intersectionStart - P0) / (P1 - P0);
     vec3 textureUvwEnd = (intersectionEnd - P0) / (P1 - P0);
 
-    float density = distance(textureUvwEnd, textureUvwStart);
+    vec3 stepComponents = abs(textureUvwStart - textureUvwEnd) * gridSize;
+    float steps = ceil(max(stepComponents.x, max(stepComponents.y, stepComponents.z)));
 
+    float tIncrement = 1.0/(steps+1.0);
+    float tEnd = 1.0 - tIncrement;
+
+
+    #if 1
+
+    float density = 0.0;
+    for(float t=tIncrement; (t<=tEnd) && (density < 1.0); t+=tIncrement)
+    {
+        float localDensity = texture(volumeData, textureUvwStart*(1.0-t) + textureUvwEnd*t).r;
+        density = max(localDensity, density);
+    }
+    density = clamp(density, 0.0, 1.0);
 
     out_rgba = texture(renderedCol, uv) * (1.0-density);
 
+    #else
+    float density = distance(textureUvwEnd, textureUvwStart);
+    out_rgba = texture(renderedCol, uv) * (1.0-density);
 
-    //out_rgba = vec4(vec3(density), 1.0);
+    #endif
+
 }
 """
 
@@ -244,6 +265,52 @@ class Renderer(object):
             wnd.height
         )
 
+
+        self._volume_texture_ptr = ctypes.c_int()
+        glCreateTextures(GL_TEXTURE_3D, 1, self._volume_texture_ptr)
+        self._volume_texture = self._volume_texture_ptr.value
+
+        glTextureParameteri(self._volume_texture, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE)
+        glTextureParameteri(self._volume_texture, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE)
+        glTextureParameteri(self._volume_texture, GL_TEXTURE_MIN_FILTER, GL_LINEAR_MIPMAP_LINEAR)
+        glTextureParameteri(self._volume_texture, GL_TEXTURE_MAG_FILTER, GL_LINEAR)
+
+        volume_dims = numpy.array([128, 128, 128])
+        self._grid_size = volume_dims
+        volume_data = numpy.array([
+            numpy.linalg.norm((
+                x / (volume_dims[0] - 1) - 0.5,
+                y / (volume_dims[1] - 1) - 0.5,
+                z / (volume_dims[2] - 1) - 0.5
+            ))
+            for x in range(volume_dims[0])
+            for y in range(volume_dims[1])
+            for z in range(volume_dims[2])
+        ],
+        dtype=numpy.float32)
+
+        volume_data *= 1.0/(3*0.5*0.5)
+        volume_data = 1.0 - volume_data
+
+        glTextureStorage3D(
+            self._volume_texture,
+            1,
+            GL_R32F,
+            volume_dims[0],
+            volume_dims[1],
+            volume_dims[2]
+        )
+
+        glTextureSubImage3D(
+            self._volume_texture,
+            0,
+            0, 0, 0,
+            volume_dims[0], volume_dims[1], volume_dims[2],
+            GL_RED,
+            GL_FLOAT,
+            volume_data.flatten().tobytes()
+        )
+
         self.camera.look_at(
             numpy.array([0, 0, 0]),
             numpy.array([5, 10, 5]),
@@ -282,14 +349,20 @@ class Renderer(object):
         glUseProgram(self._draw_volume_program)
         glBindTextureUnit(0, self._framebuffer_col.texture)
         glBindTextureUnit(1, self._framebuffer_depth.texture)
+        glBindTextureUnit(2, self._volume_texture)
         glUniform3f(0, -2, -2, -2)
         glUniform3f(1, 2, 2, 2)
         glUniformMatrix4fv(2, 1, GL_FALSE, self.camera.view_projection.flatten())
         glUniformMatrix4fv(3, 1, GL_FALSE, self.camera.projection.I.flatten())
         glUniformMatrix4fv(4, 1, GL_FALSE, self.camera.view.I.flatten())
         glUniform3f(5, self.camera.eye[0], self.camera.eye[1], self.camera.eye[2])
+        glUniform3f(6, self._grid_size[0], self._grid_size[1], self._grid_size[2])
+        
+        glDisable(GL_DEPTH_TEST)
+        glDepthMask(GL_FALSE)
         glDrawArrays(GL_TRIANGLE_STRIP, 0, 4)
-
+        glDepthMask(GL_TRUE)
+        glEnable(GL_DEPTH_TEST)
 
 
     def _resize(self, wnd, width, height):
