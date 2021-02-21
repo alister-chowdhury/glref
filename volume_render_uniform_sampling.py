@@ -1,4 +1,4 @@
-# Don't evenly sample a volume, it scales horrifically, use raymarching instead
+# This really doesn't have the best performance
 
 from math import cos, sin, pi
 
@@ -175,17 +175,32 @@ void main() {
     vec3 stepComponents = abs(textureUvwStart - textureUvwEnd) * gridSize;
     float steps = ceil(max(stepComponents.x, max(stepComponents.y, stepComponents.z)));
 
-    float tIncrement = 1.0/(steps+1.0);
+    float tIncrement = 1.0/(max(steps+1.0, 8.0));   // minimum of 8 steps to mitigate
+                                                    // z-fighting like artefacts.
     float tEnd = 1.0 - tIncrement;
 
 
     #if 1
 
     float density = 0.0;
+    float lastDensity = 0.0;
     for(float t=tIncrement; (t<=tEnd) && (density < 1.0); t+=tIncrement)
     {
         float localDensity = texture(volumeData, textureUvwStart*(1.0-t) + textureUvwEnd*t).r;
+        float deriv = lastDensity + (lastDensity - localDensity) * tIncrement;
+        lastDensity = localDensity;
+
+        // Merge over
+        #if 1
+        density = (1.0 - density) * deriv + density;
+
+        // Max
+        #else
+        
         density = max(localDensity, density);
+
+        #endif
+
     }
     density = clamp(density, 0.0, 1.0);
 
@@ -270,12 +285,13 @@ class Renderer(object):
         glCreateTextures(GL_TEXTURE_3D, 1, self._volume_texture_ptr)
         self._volume_texture = self._volume_texture_ptr.value
 
-        glTextureParameteri(self._volume_texture, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE)
-        glTextureParameteri(self._volume_texture, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE)
-        glTextureParameteri(self._volume_texture, GL_TEXTURE_MIN_FILTER, GL_LINEAR_MIPMAP_LINEAR)
+        glTextureParameteri(self._volume_texture, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_BORDER)
+        glTextureParameteri(self._volume_texture, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_BORDER)
+        glTextureParameteri(self._volume_texture, GL_TEXTURE_WRAP_R, GL_CLAMP_TO_BORDER)
+        glTextureParameteri(self._volume_texture, GL_TEXTURE_MIN_FILTER, GL_LINEAR)
         glTextureParameteri(self._volume_texture, GL_TEXTURE_MAG_FILTER, GL_LINEAR)
 
-        volume_dims = numpy.array([128, 128, 128])
+        volume_dims = numpy.array([32, 32, 32])
         self._grid_size = volume_dims
         volume_data = numpy.array([
             numpy.linalg.norm((
@@ -291,6 +307,8 @@ class Renderer(object):
 
         volume_data *= 1.0/(3*0.5*0.5)
         volume_data = 1.0 - volume_data
+        volume_data *= 0.5
+        print(volume_data)
 
         glTextureStorage3D(
             self._volume_texture,

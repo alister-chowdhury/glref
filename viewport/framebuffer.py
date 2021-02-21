@@ -8,7 +8,7 @@ from OpenGL.GL import *
 
 class FramebufferTarget(object):
 
-    def __init__(self, pixel_type, make_texture):
+    def __init__(self, pixel_type, make_texture, custom_texture_settings=None):
         self._intitialized = False
         self.pixel_type = pixel_type
         self.make_texture = make_texture
@@ -29,6 +29,8 @@ class FramebufferTarget(object):
             GL_DEPTH32F_STENCIL8,
             GL_DEPTH24_STENCIL8,
         )
+
+        self.custom_texture_settings = custom_texture_settings
 
         # Auto fixup pixel types for depth/stencil if we're writing it to
         # a texture.
@@ -65,10 +67,15 @@ class FramebufferTarget(object):
         if self.make_texture:
             glCreateTextures(GL_TEXTURE_2D, 1, self._ptr)
             glTextureStorage2D(self.value, 1, self.pixel_type, width, height)
-            glTextureParameteri(self.value, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE)
-            glTextureParameteri(self.value, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE)
-            glTextureParameteri(self.value, GL_TEXTURE_MIN_FILTER, GL_NEAREST)
-            glTextureParameteri(self.value, GL_TEXTURE_MAG_FILTER, GL_NEAREST)
+
+            if self.custom_texture_settings:
+                for pname, pvalue in self.custom_texture_settings.items():
+                    glTextureParameteri(self.value, pname, pvalue)
+            else:
+                glTextureParameteri(self.value, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE)
+                glTextureParameteri(self.value, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE)
+                glTextureParameteri(self.value, GL_TEXTURE_MIN_FILTER, GL_NEAREST)
+                glTextureParameteri(self.value, GL_TEXTURE_MAG_FILTER, GL_NEAREST)
             glNamedFramebufferTexture(framebuffer, self._attachment_id, self.value, 0)
         else:
             glGenRenderbuffers(1, self._ptr)
