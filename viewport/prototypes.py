@@ -51,6 +51,15 @@ PUV_PLANE_VERTICES = numpy.array([
     -1.0, 0.0, 1.0,       0.0, 1.0,
 ], dtype=numpy.float32)
 
+
+PNUV_PLANE_VERTICES = numpy.array([
+    # P                   N                   UV
+    -1.0, 0.0, -1.0,      0.0, 1.0, 0.0,      0.0, 0.0,
+     1.0, 0.0, -1.0,      0.0, 1.0, 0.0,      1.0, 0.0,
+     1.0, 0.0, 1.0,       0.0, 1.0, 0.0,      1.0, 1.0,
+    -1.0, 0.0, 1.0,       0.0, 1.0, 0.0,      0.0, 1.0,
+], dtype=numpy.float32)
+
 PLANE_INDICES = numpy.array([
     0, 1, 2,
     2, 3, 0,

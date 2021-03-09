@@ -123,6 +123,10 @@ class Camera(object):
         if self._view_projection is None:
             self._view_projection = self.view * self.projection
         return self._view_projection
+
+    @property
+    def fov(self):
+        return self._fov
     
     def set_fov(self, fov):
         self._fov = fov

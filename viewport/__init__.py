@@ -14,6 +14,7 @@ from . prototypes import (
 
     PUV_CUBE_VERTICES,
     PUV_PLANE_VERTICES,
+    PNUV_PLANE_VERTICES,
 
     CUBE_INDICES,
     PLANE_INDICES
