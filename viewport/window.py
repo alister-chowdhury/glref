@@ -41,7 +41,8 @@ class Window(object):
         glutCreateWindow(self.title)
         glutReshapeFunc(self._resize)
         glutDisplayFunc(self._draw)
-        glutIdleFunc(self._idle)
+        if self.on_idle:
+            glutIdleFunc(self._idle)
         glutKeyboardFunc(self._keypress)
         glutMouseFunc(self._mouse)
         glutMotionFunc(self._drag)

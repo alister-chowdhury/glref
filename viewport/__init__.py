@@ -1,5 +1,6 @@
 
 from . camera import Camera
+from . extensions import get_gl_extensions, has_gl_extension
 from . framebuffer import Framebuffer, FramebufferTarget
 from . geometry import StaticGeometry, StaticCombinedGeometry
 from . program import (
