@@ -32,7 +32,7 @@ def build_shader(source, shader_type=GL_VERTEX_SHADER):
         raise RuntimeError(
             "Failed to load {0} shader:\n{1}".format(
                 _SHADER_NICE_NAME[shader_type],
-                error_log,
+                error_log.decode("latin-1"),
             )
         )
     return shader_id
@@ -77,7 +77,7 @@ def generate_shader_program(**shader_type_source):
     ok = glGetProgramiv(main_program, GL_LINK_STATUS)
     if not ok:
         error_log = glGetProgramInfoLog(main_program)
-        raise RuntimeError("Failed to link program:\n{0}".format(error_log))
+        raise RuntimeError("Failed to link program:\n{0}".format(error_log.decode("latin-1")))
 
     for shader_id in shader_ids:
         glDetachShader(main_program, shader_id)

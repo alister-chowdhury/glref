@@ -1,3 +1,6 @@
+# FIXME: Theres a weird hole occuring
+
+
 from math import cos, sin, pi
 
 import numpy
@@ -14,44 +17,14 @@ MESH_SHADER_SOURCE = """
 #extension GL_NV_mesh_shader : require
 
 
-layout(local_size_x = 12) in;
-layout(triangles, max_vertices = 36, max_primitives = 12) out;
+layout(local_size_x = 32) in;
+layout(triangles, max_vertices = 128, max_primitives = 256) out;
 
 
 layout(location = 0) uniform mat4 model;
 layout(location = 1) uniform mat4 modelViewProjection;
 layout(location = 2) uniform mat4 inverseTransposeModel;
 
-
-const uvec3 indices[12] = uvec3[12](
-    // front
-    uvec3(0, 1, 2), uvec3(2, 3, 0),
-    // top
-    uvec3(1, 5, 6), uvec3(6, 2, 1),
-    // back
-    uvec3(7, 6, 5), uvec3(5, 4, 7),
-    // bottom
-    uvec3(4, 0, 3), uvec3(3, 7, 4),
-    // left
-    uvec3(4, 5, 1), uvec3(1, 0, 4),
-    // right
-    uvec3(3, 2, 6), uvec3(6, 7, 3)
-);
-
-const vec3 positions[8] = vec3[8](
-    // front
-    vec3(-1.0,  -1.0,  1.0), vec3(1.0,   -1.0,  1.0),
-    vec3(1.0,   1.0,   1.0), vec3(-1.0,  1.0,   1.0),
-    // back
-    vec3(-1.0,  -1.0, -1.0), vec3(1.0,   -1.0, -1.0),
-    vec3(1.0,   1.0,  -1.0), vec3(-1.0,  1.0,  -1.0)
-);
-
-
-const vec2 uvs[4] = vec2[4](
-    vec2(0.0, 0.0), vec2(1.0, 0.0),
-    vec2(1.0, 1.0), vec2(0.0, 1.0)
-);
 
 
 out VsOut
@@ -63,45 +36,67 @@ out VsOut
 
 
 
-vec3 applyModelMatrix(vec3 P)
-{
-    vec4 Pprime = model * vec4(P, 1.0);
-    return Pprime.xyz / Pprime.z;
-}
+#define TWOPI 6.28318530717958647692528676656
+#define PI    3.14159265358979323846264338328
 
+
+#define uCounts 4
+#define vCounts 4
 
 void main()
 {
     const uint tid = gl_GlobalInvocationID.x;
+    gl_PrimitiveCountNV = uCounts * vCounts * 2;
+    // vertex count = (uCounts+1) * (vCounts+1);
 
-    gl_PrimitiveCountNV = 12;
-    uvec3 triangleIndices = indices[tid];
+    // Add vertex
+    if(tid < (uCounts+1)*(vCounts+1))
+    {
+        const float uid = float(tid % (uCounts+1));
+        const float vid = float(tid / (uCounts+1));
 
-    vec3 Pa = positions[triangleIndices.x];
-    vec3 Pb = positions[triangleIndices.y];
-    vec3 Pc = positions[triangleIndices.z];
+        const vec2 uv = vec2(uid, vid) / vec2(float(uCounts), float(vCounts));
 
-    vec3 N = (inverseTransposeModel * vec4(normalize(cross(Pb-Pa, Pc-Pa)), 1.0)).xyz;
+        float theta = uv.x * PI;
+        float phi = uv.y * TWOPI;
 
-    vsout[tid*3].P = applyModelMatrix(Pa);
-    vsout[tid*3].N = N;
-    vsout[tid*3].uv = uvs[triangleIndices.x & 3];
+        vec4 N = vec4(
+            normalize(vec3(
+                sin(theta) * cos(phi),
+                sin(theta) * sin(phi),
+                cos(theta)
+            )),
+            1.0
+        );
 
-    vsout[tid*3+1].P = applyModelMatrix(Pb);
-    vsout[tid*3+1].N = N;
-    vsout[tid*3+1].uv = uvs[triangleIndices.y & 3];
+        gl_MeshVerticesNV[tid].gl_Position = modelViewProjection * N;
 
-    vsout[tid*3+2].P = applyModelMatrix(Pc);
-    vsout[tid*3+2].N = N;
-    vsout[tid*3+2].uv = uvs[triangleIndices.z & 3];
+        vec4 P = model * N;
+             P.xyz /= P.w;
 
-    gl_MeshVerticesNV[3*tid].gl_Position = modelViewProjection * vec4(Pa, 1.0);
-    gl_MeshVerticesNV[3*tid+1].gl_Position = modelViewProjection * vec4(Pb, 1.0);
-    gl_MeshVerticesNV[3*tid+2].gl_Position = modelViewProjection * vec4(Pc, 1.0);
+        N = inverseTransposeModel * N;
+             N.xyz /= P.w;
 
-    gl_PrimitiveIndicesNV[3*tid] = 3*tid;
-    gl_PrimitiveIndicesNV[3*tid+1] = 3*tid+1;
-    gl_PrimitiveIndicesNV[3*tid+2] = 3*tid+2;
+        vsout[tid].P = P.xyz;
+        vsout[tid].N = N.xyz;
+        vsout[tid].uv = uv.yx;
+
+    }
+
+
+    // Add quad
+    if(tid < (uCounts*vCounts))
+    {
+        uint vindex = tid;
+
+        gl_PrimitiveIndicesNV[6*tid+0] = vindex;
+        gl_PrimitiveIndicesNV[6*tid+1] = vindex+1;
+        gl_PrimitiveIndicesNV[6*tid+2] = vindex+1 + (uCounts+1);
+
+        gl_PrimitiveIndicesNV[6*tid+3] = vindex;
+        gl_PrimitiveIndicesNV[6*tid+4] = vindex+1 + (uCounts+1);
+        gl_PrimitiveIndicesNV[6*tid+5] = vindex   + (uCounts+1);
+    }
 
 }
 
@@ -164,7 +159,7 @@ class Renderer(object):
         glEnable(GL_DEPTH_TEST)
         glDisable(GL_CULL_FACE)
 
-        self._cube_model = numpy.matrix([
+        self._sphere_model = numpy.matrix([
             [1, 0, 0, 0],
             [0, 1, 0, 0],
             [0, 0, 1, 0],
@@ -188,9 +183,9 @@ class Renderer(object):
         glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT)
 
         glUseProgram(self._draw_cube_program)
-        glUniformMatrix4fv(0, 1, GL_FALSE, self._cube_model.flatten())
-        glUniformMatrix4fv(1, 1, GL_FALSE, (self._cube_model * self.camera.view_projection).flatten())
-        glUniformMatrix4fv(2, 1, GL_FALSE, (self._cube_model.T.I.flatten()))
+        glUniformMatrix4fv(0, 1, GL_FALSE, self._sphere_model.flatten())
+        glUniformMatrix4fv(1, 1, GL_FALSE, (self._sphere_model * self.camera.view_projection).flatten())
+        glUniformMatrix4fv(2, 1, GL_FALSE, (self._sphere_model.T.I.flatten()))
         glUniform1ui(3, self.display_mode)
         glDrawMeshTasksNV(0, 1)
 
