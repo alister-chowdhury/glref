@@ -1,10 +1,19 @@
 import ctypes
+from enum import Enum
 
 import numpy
 
 from OpenGL.GL import *
 
-__all__ = ("StaticGeometry", "StaticCombinedGeometry")
+try:
+    import pywavefront
+    _has_pywavefront = True
+except ImportError:
+    _has_pywavefront = False
+
+
+
+__all__ = ("StaticGeometry", "StaticCombinedGeometry", "ObjGeomAttr", "load_obj")
 
 
 class StaticGeometry(object):
@@ -180,3 +189,117 @@ class StaticCombinedGeometry(object):
         if self._cleanup:
             glDeleteVertexArrays(1, self._vao_ptr)
             glDeleteBuffers(5, self._buffers)
+
+
+class ObjGeomAttr(Enum):
+    UV = 0
+    P = 1
+    N = 2
+
+
+_OBJATTR_TO_PYWAVE_VERTEX_FORMAT = {
+    ObjGeomAttr.UV: "T2F",
+    ObjGeomAttr.P: "V3F",
+    ObjGeomAttr.N: "N3F",
+}
+
+_OBJATTR_TO_SIZE = {
+    ObjGeomAttr.UV: 2,
+    ObjGeomAttr.P: 3,
+    ObjGeomAttr.N: 3,    
+}
+
+
+def load_obj(obj_filepath, attrs):
+    """Load an OBJ into a drawable mesh.
+
+    Args:
+        obj_filepath (str): Obj file to stream in.
+        attrs (iterable[ObjGeomAttr]): Attributes to read.
+
+    Returns:
+        StaticGeometry or StaticCombinedGeometry: Drawable mesh.
+    """
+    assert _has_pywavefront
+    obj_filepath = obj_filepath
+    attrs = tuple(attrs)
+
+    scene = pywavefront.Wavefront(obj_filepath)
+
+    mesh_data = []
+    for mesh in scene.mesh_list:
+        # Not supporting anything fancy here
+        material = mesh.materials[0]
+        obj_attrs = material.vertex_format.split("_")
+
+        # Figure out where the attributes we care about are
+        # located within the obj vertex layout
+        obj_attr_offset = 0
+        obj_attr_offsets = []
+        for obj_attr in obj_attrs:
+            obj_attr_offsets.append(obj_attr_offset)
+            if obj_attr.endswith("3F"):
+                obj_attr_offset += 3
+            elif obj_attr.endswith("2F"):
+                obj_attr_offset += 2
+            else:
+                raise RuntimeError(
+                    "Unknown pywavefront attr size for {0}"
+                    .format(obj_attr)
+                )
+
+        obj_vertices = numpy.array(material.vertices, dtype=numpy.float32)
+        obj_vertices = obj_vertices.reshape(
+            (obj_vertices.size//obj_attr_offset, obj_attr_offset)
+        ).T
+
+        # Load arrays of vertices into a list
+        # which we will then coallasce at the end
+        vertex_data = []
+
+        for attr in attrs:
+            obj_attr_name = _OBJATTR_TO_PYWAVE_VERTEX_FORMAT[attr]
+            if obj_attr_name not in obj_attrs:
+                raise RuntimeError(
+                    "Missing attribute on mesh: {0}".format(attr.name)
+                )
+            obj_attr_offset = obj_attr_offsets[
+                obj_attrs.index(obj_attr_name)
+            ]
+            attr_data = obj_vertices[
+                obj_attr_offset:
+                obj_attr_offset+_OBJATTR_TO_SIZE[attr]
+            ]
+            vertex_data.append(attr_data.T)
+
+        # pywavefront doesn't index things and its face collection is pretty useless
+        # so we're just going to do it ourselves
+        vertex_data = numpy.column_stack(vertex_data)
+        vertex_tuples = tuple(map(tuple, vertex_data))
+        unique_vertices = tuple(set(vertex_tuples))
+        vertex_map = {vertex: index for index, vertex in enumerate(unique_vertices)}
+
+        vertices = numpy.array(unique_vertices, dtype=numpy.float32).ravel()
+        indices = numpy.array([vertex_map[vertex] for vertex in vertex_tuples], dtype=numpy.uint32)
+
+        mesh_data.append((indices, vertices))
+
+    vertex_attrib_sizes = [
+        _OBJATTR_TO_SIZE[attr]
+        for attr in attrs
+    ]
+
+    assert len(mesh_data) > 0
+
+    if len(mesh_data) == 1:
+        return StaticGeometry(
+            vertex_attrib_sizes,
+            mesh_data[0][0],
+            mesh_data[0][1]
+        )
+
+    else:
+        return StaticCombinedGeometry(
+            vertex_attrib_sizes,
+            mesh_data
+        )

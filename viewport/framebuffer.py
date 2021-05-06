@@ -170,3 +170,13 @@ class Framebuffer(object):
             filter_
         )
 
+    def blit(self, target, width, height, mask=GL_COLOR_BUFFER_BIT, filter_=GL_LINEAR):
+        glBlitNamedFramebuffer(
+            self.value,
+            target,
+            0, 0, width, height,
+            0, 0, width, height,
+            mask,
+            filter_
+        )
+

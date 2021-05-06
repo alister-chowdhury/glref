@@ -1,4 +1,4 @@
-# FIXME: Theres a weird hole occuring
+# FIXME: Theres a weird hole occuring,
 
 
 from math import cos, sin, pi
@@ -40,8 +40,8 @@ out VsOut
 #define PI    3.14159265358979323846264338328
 
 
-#define uCounts 4
-#define vCounts 4
+#define uCounts 3
+#define vCounts 3
 
 void main()
 {
