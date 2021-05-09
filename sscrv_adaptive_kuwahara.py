@@ -1,3 +1,24 @@
+"""
+Screen space curvature (for a lack of a better name).
+
+The main purpose of this, is it helps "enchance" convex and concave regions
+of a model considerably better than SSAO by a means of appoximating curvature.
+
+It has the additional benefit that it only requires a depth pass (or view space
+positions).
+
+The down side is normals are implicitly smoothed or hardend based upon the
+radius.
+
+This is very similar to SSAO but differs in the following ways:
+    1. The hemisphere pointing to the camera is used, rather than the
+       surface normal.
+    2. The final occlusion starts of as mid occluded, rather than fully
+       occluded or fully visible.
+    3. When a sample is infront of the reference position the visibility
+       is decreased, when it is behind it is increased.
+
+"""
 from math import cos, sin, pi
 
 import numpy
@@ -10,38 +31,15 @@ import viewport
 DRAW_N_VERTEX_SHADER_SOURCE = """
 #version 460 core
 
-layout(location = 0) uniform mat4 model;
-layout(location = 1) uniform mat4 modelViewProjection;
+layout(location = 0) uniform mat4 modelViewProjection;
 
 layout(location = 0) in vec3 P;
-layout(location = 1) in vec2 uv;
-layout(location = 2) in vec3 N;
-
-layout(location = 0) out vec3 outP;
-layout(location = 1) out vec3 outN;
 
 void main() {
-    vec4 worldP = model * vec4(P, 1.0);
-    outP = worldP.xyz / worldP.w;
-    vec4 worldN = inverse(transpose(model)) * vec4(N, 1.0);
-    outN = normalize(worldN.xyz);
     gl_Position = modelViewProjection * vec4(P, 1.0);
 }
 """
 
-DRAW_N_FRAGMENT_SHADER_SOURCE = """
-#version 460 core
-
-layout(location = 0) in vec3 P;
-layout(location = 1) in vec3 N;
-layout(location = 0) out vec3 outN;
-
-void main() {
-    outN = normalize(N);
-    // Enable for geometric normals
-    // outN = normalize(cross(dFdx(P), dFdy(P)));
-}
-"""
 
 FULLSCREEN_VERTEX_SHADER_SOURCE = """
 #version 460 core
@@ -58,27 +56,13 @@ void main() {
 }
 """
 
-SSAO_FRAGMENT_SHADER_SOURCE = """
+SSCRV_FRAGMENT_SHADER_SOURCE = """
 #version 460 core
 
 layout(location = 0) uniform mat4 inverseProjection;
-layout(location = 1) uniform mat4 viewInverseTranspose;
-layout(location = 2) uniform mat4 projection;
-layout(location = 3) uniform uint backface;  // When set to 1, reverse the normal
-                                             // if it is facing away from the camera.
-                                             //
-                                             // This can cause artefacts at grazing angles
-                                             // when not using face normals.
-                                             // (Interpolated or mapped normals
-                                             // may be facing away from the camera).
+layout(location = 1) uniform mat4 projection;
 
-layout(binding = 0) uniform sampler2D normalPass; // This example uses world normals, but
-                                                  // using view space normals would be a
-                                                  // better idea.
-                                                  // Especially as it would mean viewInverseTranspose
-                                                  // doesn't need to be provided.
-
-layout(binding = 1) uniform sampler2D depthPass;
+layout(binding = 0) uniform sampler2D depthPass;
 
 layout(location = 0) in vec2 uv;
 layout(location = 0) out vec4 outRgba;
@@ -92,9 +76,6 @@ layout(location = 0) out vec4 outRgba;
 #ifndef SAMPLES_COUNT
 #   define SAMPLES_COUNT 32
 #endif
-
-
-#define BIAS 0.001
 
 
 // Vectors which more-or-less evenly sample the hemisphere of (0, 0, 1)
@@ -179,20 +160,11 @@ void main() {
 
     if (position.w <= 0) { return; }
 
-    // Calculate the normal in view space,
-    // Generate a orthonormal basis to orientate our hemisphere vectors
-    // in the direction of the normal.
     mat3 TBN;
     {
-        vec4 N = viewInverseTranspose * texture(normalPass, uv);
-        N.xyz = normalize(N.xyz);
-
-        // If we're doing back face stuff, make sure the normal is facing
-        // the camera.
-        if(backface == 1 && dot(position.xyz, N.xyz) > 0)
-        {
-            N = -N;
-        }
+        // We use the direction to the camera as our normal
+        // rather than a surface normal (i.e SSAO)
+        vec3 N = -normalize(position.xyz);
 
         // Frisvad + Pixar Orthonormal Basis
         // https://graphics.pixar.com/library/OrthonormalB/paper.pdf
@@ -204,11 +176,11 @@ void main() {
         const vec3  B  = vec3(b,
                               sign(N.z) + N.y * N.y * a,
                               -N.y);
-        TBN = mat3(T, B, N.xyz);
+        TBN = mat3(T, B, N);
 
         // Pre-rotate our matrix on the Z axis, by a random amount per-pixel.
         // This prevents visible banding that results from the the hemisphere vectors
-        // probing the same directions on a surface with flat normals.
+        // probing the same directions
         // Random Function : https://www.shadertoy.com/view/Xt23Ry
         float theta = 6.28318530718 * fract(sin(dot(uv, vec2(12.9898,78.233))) * 43758.5453);
         float ca = cos(theta);
@@ -229,7 +201,8 @@ void main() {
     //    on the depth pass.
     // 3. Sample the depth pass and determine if the point is behind
     //    or infront of the offseted position.
-    // 4. If it is in-front mark that as an occlusion.
+    // 4. If it is in-front mark that decrease the visibility
+    //    otherwise increase it.
 
     float visibility = SAMPLES_COUNT;
 
@@ -242,12 +215,24 @@ void main() {
              sampleUv.xy   = sampleUv.xy * 0.5 + 0.5;
 
         float compareDepth = texture(depthPass, sampleUv.xy).x;
-        if(!(compareDepth > 0 && compareDepth < 1)){ continue; }
+        
+        // When there is nothing to sample in a region, we adjust the visibility
+        // to bias the convexity, the reason for this is to combat the rather
+        // distracting haloing that seems to be visible.
+        // When attempting to only keep track of which samples pass the test,
+        // the result ends up being a bit noisey and rubbish
+        if(!(compareDepth > 0 && compareDepth < 1))
+        {
+            visibility += 0.5;
+            continue;
+        }
 
         vec4 comparePosition = inverseProjection * vec4(2.0 * sampleUv.xy - 1.0, compareDepth, 1.0);
         comparePosition /= comparePosition.w;
 
-        float occluded = float(projPosition.z + BIAS < comparePosition.z);
+        float occluded = float(projPosition.z < comparePosition.z);
+        occluded *= 2;
+        occluded -= 1;
 
         // Attenuate the influence of the occlusion by the distance in viewspace depth
         // from the original position and sampled position.
@@ -259,8 +244,145 @@ void main() {
         visibility -= occluded * attenuation;
     }
 
-    visibility /= SAMPLES_COUNT;
+    visibility /= SAMPLES_COUNT * 2;
     outRgba = vec4(visibility);
+}
+
+"""
+
+
+ADPT_KUWAHARA_FRAGMENT_SHADER_SOURCE = """
+#version 460 core
+
+layout(binding = 0) uniform sampler2D renderTarget;
+
+layout(location = 0) in vec2 uv;
+layout(location = 0) out vec4 outRgba;
+
+
+// Hard coded with a max depth of 3
+// 1 = 3x3 grid with 2x2 window
+// 2 = 5x5 grid with 3x3 window
+// 3 = 7x7 grid with 4x4 window
+// etc etc
+
+#define MAX_GRID_DIM_SIZE   (2*3 + 1)
+#define MIDDLE_INDEX        ((MAX_GRID_DIM_SIZE * MAX_GRID_DIM_SIZE) / 2)
+
+
+float samples[MAX_GRID_DIM_SIZE * MAX_GRID_DIM_SIZE];
+
+
+float sqr(float x) { return x*x; }
+
+
+vec2 meanAndStd(int qx, int qy)
+{
+    // Startup of with a depth of 1
+    float summed =   samples[MIDDLE_INDEX]                                  // 0,   0
+                   + samples[MIDDLE_INDEX + qx]                             // qx,  0
+                   + samples[MIDDLE_INDEX + (MAX_GRID_DIM_SIZE*qy) + qx]    // qx, qy
+                   + samples[MIDDLE_INDEX + (MAX_GRID_DIM_SIZE*qy)]         // 0,  qy
+                   ;
+
+    vec2 meanStdD1;
+    meanStdD1.x = summed / 4;
+    meanStdD1.y =    sqr(samples[MIDDLE_INDEX] - meanStdD1.x)
+                   + sqr(samples[MIDDLE_INDEX + qx] - meanStdD1.x)
+                   + sqr(samples[MIDDLE_INDEX + (MAX_GRID_DIM_SIZE*qy) + qx] - meanStdD1.x)
+                   + sqr(samples[MIDDLE_INDEX + (MAX_GRID_DIM_SIZE*qy)] - meanStdD1.x)
+                   ;
+
+    summed +=  samples[MIDDLE_INDEX + (MAX_GRID_DIM_SIZE*qy*2) + qx*0]     // 0,   2qy
+             + samples[MIDDLE_INDEX + (MAX_GRID_DIM_SIZE*qy*2) + qx*1]     // qx,  2qy
+             + samples[MIDDLE_INDEX + (MAX_GRID_DIM_SIZE*qy*2) + qx*2]     // 2qx, 2qy
+             + samples[MIDDLE_INDEX + (MAX_GRID_DIM_SIZE*qy*1) + qx*2]     // 2qx, qy
+             + samples[MIDDLE_INDEX + (MAX_GRID_DIM_SIZE*qy*0) + qx*2]     // 2qx, 0
+             ;
+
+    vec2 meanStdD2 = meanStdD1;
+    meanStdD2.x = summed / 9;
+    meanStdD2.y +=  sqr(samples[MIDDLE_INDEX + (MAX_GRID_DIM_SIZE*qy*2) + qx*0] - meanStdD2.x)
+                  + sqr(samples[MIDDLE_INDEX + (MAX_GRID_DIM_SIZE*qy*2) + qx*1] - meanStdD2.x)
+                  + sqr(samples[MIDDLE_INDEX + (MAX_GRID_DIM_SIZE*qy*2) + qx*2] - meanStdD2.x)
+                  + sqr(samples[MIDDLE_INDEX + (MAX_GRID_DIM_SIZE*qy*1) + qx*2] - meanStdD2.x)
+                  + sqr(samples[MIDDLE_INDEX + (MAX_GRID_DIM_SIZE*qy*0) + qx*2] - meanStdD2.x)
+                  ;
+
+    // If smaller window is smaller return it and don't bother with the
+    // third level.
+    if(meanStdD2.y/9 > meanStdD1.y/4)
+    {
+        meanStdD1.y /= 4;
+        return meanStdD1;
+    }
+
+    summed +=  samples[MIDDLE_INDEX + (MAX_GRID_DIM_SIZE*qy*3) + qx*0]     // 0,   3qy
+             + samples[MIDDLE_INDEX + (MAX_GRID_DIM_SIZE*qy*3) + qx*1]     // qx,  3qy
+             + samples[MIDDLE_INDEX + (MAX_GRID_DIM_SIZE*qy*3) + qx*2]     // 2qx, 3qy
+             + samples[MIDDLE_INDEX + (MAX_GRID_DIM_SIZE*qy*3) + qx*3]     // 3qx, 3qy
+             + samples[MIDDLE_INDEX + (MAX_GRID_DIM_SIZE*qy*2) + qx*3]     // 3qx, 2qy
+             + samples[MIDDLE_INDEX + (MAX_GRID_DIM_SIZE*qy*1) + qx*3]     // 3qx, 1qy
+             + samples[MIDDLE_INDEX + (MAX_GRID_DIM_SIZE*qy*0) + qx*3]     // 3qx, 0
+             ;
+
+    vec2 meanStdD3 = meanStdD2;
+    meanStdD3.x = summed / 16;
+    meanStdD3.y +=  sqr(samples[MIDDLE_INDEX + (MAX_GRID_DIM_SIZE*qy*3) + qx*0] - meanStdD3.x)
+                  + sqr(samples[MIDDLE_INDEX + (MAX_GRID_DIM_SIZE*qy*3) + qx*1] - meanStdD3.x)
+                  + sqr(samples[MIDDLE_INDEX + (MAX_GRID_DIM_SIZE*qy*3) + qx*2] - meanStdD3.x)
+                  + sqr(samples[MIDDLE_INDEX + (MAX_GRID_DIM_SIZE*qy*3) + qx*3] - meanStdD3.x)
+                  + sqr(samples[MIDDLE_INDEX + (MAX_GRID_DIM_SIZE*qy*2) + qx*3] - meanStdD3.x)
+                  + sqr(samples[MIDDLE_INDEX + (MAX_GRID_DIM_SIZE*qy*1) + qx*3] - meanStdD3.x)
+                  + sqr(samples[MIDDLE_INDEX + (MAX_GRID_DIM_SIZE*qy*0) + qx*3] - meanStdD3.x)
+                  ;
+
+    meanStdD2.y /= 9;
+    meanStdD3.y /= 16;
+    if(meanStdD2.y < meanStdD3.y)
+    {
+        return meanStdD2;
+    }
+    return meanStdD3;
+}
+
+
+void main() {
+
+    // Up front fetch the samples
+    int pixOffset = -MAX_GRID_DIM_SIZE/2;
+    vec2 pixelSize = fwidthCoarse(uv) * 1.41421356237; // Scaling the pixel size
+                                                       // allows for a visually nicer
+                                                       // dithering-like pattern
+
+    for(int Y=0; Y<MAX_GRID_DIM_SIZE; ++Y)
+    {
+        for(int X=0; X<MAX_GRID_DIM_SIZE; ++X)
+        {
+            samples[Y*MAX_GRID_DIM_SIZE + X] = texture(renderTarget, uv + vec2(float(X + pixOffset), float(Y + pixOffset)) * pixelSize ).x;
+        }
+    }
+
+    vec2 meanStdQ1 = meanAndStd(-1, -1);
+    vec2 meanStdQ2 = meanAndStd(1, -1);
+    vec2 meanStdQ3 = meanAndStd(1, 1);
+    vec2 meanStdQ4 = meanAndStd(-1, 1);
+
+    vec2 target = meanStdQ1;
+    if(meanStdQ2.y < target.y)
+    {
+        target = meanStdQ2;
+    }
+    if(meanStdQ3.y < target.y)
+    {
+        target = meanStdQ3;
+    }
+    if(meanStdQ4.y < target.y)
+    {
+        target = meanStdQ4;
+    }
+
+    outRgba = vec4(target.x);
 }
 
 """
@@ -281,8 +403,7 @@ class Renderer(object):
         self.window.on_keypress = self._keypress
 
         self.main_geom = None
-
-        self._backface = 0
+        self._option = 0
 
     def run(self):
         self.window.run()
@@ -299,8 +420,6 @@ class Renderer(object):
             "data/armadillo.obj",
             (
                 viewport.ObjGeomAttr.P,
-                viewport.ObjGeomAttr.UV,
-                viewport.ObjGeomAttr.N
             )
         )
 
@@ -312,26 +431,20 @@ class Renderer(object):
         ], dtype=numpy.float32)
 
 
-        self._draw_n_program = viewport.generate_shader_program(
+        self._draw_depth_program = viewport.generate_shader_program(
             GL_VERTEX_SHADER=DRAW_N_VERTEX_SHADER_SOURCE,
-            GL_FRAGMENT_SHADER=DRAW_N_FRAGMENT_SHADER_SOURCE
         )
 
-        self._ssao_program = viewport.generate_shader_program(
+        self._sscrv_program = viewport.generate_shader_program(
             GL_VERTEX_SHADER=FULLSCREEN_VERTEX_SHADER_SOURCE,
-            GL_FRAGMENT_SHADER=SSAO_FRAGMENT_SHADER_SOURCE
+            GL_FRAGMENT_SHADER=SSCRV_FRAGMENT_SHADER_SOURCE
         )
 
-        self._framebuffer_n = viewport.FramebufferTarget(
-            GL_RGB32F,
-            True,
-            custom_texture_settings={
-                GL_TEXTURE_WRAP_S: GL_CLAMP_TO_EDGE,
-                GL_TEXTURE_WRAP_T: GL_CLAMP_TO_EDGE,
-                GL_TEXTURE_MIN_FILTER: GL_LINEAR,
-                GL_TEXTURE_MAG_FILTER: GL_LINEAR,
-            }
+        self._adpt_kuwahara_program = viewport.generate_shader_program(
+            GL_VERTEX_SHADER=FULLSCREEN_VERTEX_SHADER_SOURCE,
+            GL_FRAGMENT_SHADER=ADPT_KUWAHARA_FRAGMENT_SHADER_SOURCE
         )
+
         self._framebuffer_depth = viewport.FramebufferTarget(
             GL_DEPTH32F_STENCIL8,
             True,
@@ -343,16 +456,33 @@ class Renderer(object):
             }
         )
         self._framebuffer = viewport.Framebuffer(
-            (self._framebuffer_n, self._framebuffer_depth),
+            (self._framebuffer_depth,),
             wnd.width,
             wnd.height
         )
 
         # Second framebuffer so we can see things with renderdoc
-        self._framebuffer2_col = viewport.FramebufferTarget(GL_RGB32F, True)
+        self._framebuffer2_col = viewport.FramebufferTarget(
+            GL_RGB32F,
+            True,
+            custom_texture_settings={
+                GL_TEXTURE_WRAP_S: GL_CLAMP_TO_EDGE,
+                GL_TEXTURE_WRAP_T: GL_CLAMP_TO_EDGE,
+                GL_TEXTURE_MIN_FILTER: GL_LINEAR,
+                GL_TEXTURE_MAG_FILTER: GL_LINEAR,
+            }
+        )
         self._framebuffer2_depth = viewport.FramebufferTarget(GL_DEPTH32F_STENCIL8, True)
         self._framebuffer2 = viewport.Framebuffer(
             (self._framebuffer2_col, self._framebuffer2_depth),
+            wnd.width,
+            wnd.height
+        )
+
+        self._framebuffer3_col = viewport.FramebufferTarget(GL_RGB32F, True)
+        self._framebuffer3_depth = viewport.FramebufferTarget(GL_DEPTH32F_STENCIL8, True)
+        self._framebuffer3 = viewport.Framebuffer(
+            (self._framebuffer3_col, self._framebuffer3_depth),
             wnd.width,
             wnd.height
         )
@@ -366,19 +496,21 @@ class Renderer(object):
 
 
     def _draw(self, wnd):
-        # Draw P, N + stencil-depth
+        # Draw stencil-depth
         with self._framebuffer.bind():
             glStencilFunc(GL_ALWAYS, 1, 0xFF)
             glStencilOp(GL_KEEP, GL_KEEP, GL_REPLACE)
             glStencilMask(0xFF)
             glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT | GL_STENCIL_BUFFER_BIT)
 
-            glUseProgram(self._draw_n_program)
-            glUniformMatrix4fv(0, 1, GL_FALSE, self._main_geom_model.flatten())
-            glUniformMatrix4fv(1, 1, GL_FALSE, (self._main_geom_model * self.camera.view_projection).flatten())
+            glUseProgram(self._draw_depth_program)
+            glUniformMatrix4fv(0, 1, GL_FALSE, (self._main_geom_model * self.camera.view_projection).flatten())
             self.main_geom.draw()
 
+        # Akward GL gubbins + me not bothering to make targets of a framebuffer
+        # interchangable
         self._framebuffer.blit(self._framebuffer2.value, wnd.width, wnd.height, GL_STENCIL_BUFFER_BIT, GL_NEAREST)
+        self._framebuffer.blit(self._framebuffer3.value, wnd.width, wnd.height, GL_STENCIL_BUFFER_BIT, GL_NEAREST)
         
         # Apply SSAO
         with self._framebuffer2.bind():        
@@ -387,23 +519,35 @@ class Renderer(object):
             glStencilMask(0x00)
             glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT)
 
-            glUseProgram(self._ssao_program)
+            glUseProgram(self._sscrv_program)
             glUniformMatrix4fv(0, 1, GL_FALSE, self.camera.projection.I.flatten())
-            glUniformMatrix4fv(1, 1, GL_FALSE, self.camera.view.I.T.flatten())
-            glUniformMatrix4fv(2, 1, GL_FALSE, self.camera.projection.flatten())
-            glUniform1ui(3, self._backface)
-            glBindTextureUnit(0, self._framebuffer_n.texture)
-            glBindTextureUnit(1, self._framebuffer_depth.texture)
+            glUniformMatrix4fv(1, 1, GL_FALSE, self.camera.projection.flatten())
+            glBindTextureUnit(0, self._framebuffer_depth.texture)
+            glDrawArrays(GL_TRIANGLES, 0, 3)
+
+        with self._framebuffer3.bind():        
+            glStencilFunc(GL_EQUAL, 1, 0xFF)
+            glStencilOp(GL_KEEP, GL_KEEP, GL_KEEP)
+            glStencilMask(0x00)
+            glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT)
+
+            glUseProgram(self._adpt_kuwahara_program)
+            glBindTextureUnit(0, self._framebuffer2_col.texture)
             glDrawArrays(GL_TRIANGLES, 0, 3)
 
         # Copy to back
         glClear(GL_COLOR_BUFFER_BIT)
-        self._framebuffer2.blit_to_back(wnd.width, wnd.height, GL_COLOR_BUFFER_BIT, GL_NEAREST)
+
+        if self._option == 1:
+            self._framebuffer3.blit_to_back(wnd.width, wnd.height, GL_COLOR_BUFFER_BIT, GL_NEAREST)
+        else:
+            self._framebuffer2.blit_to_back(wnd.width, wnd.height, GL_COLOR_BUFFER_BIT, GL_NEAREST)
 
 
     def _resize(self, wnd, width, height):
         self._framebuffer.resize(width, height)
         self._framebuffer2.resize(width, height)
+        self._framebuffer3.resize(width, height)
         glViewport(0, 0, width, height)
         self.camera.set_aspect(width/height)
 
@@ -430,10 +574,8 @@ class Renderer(object):
             self.camera.move_local(numpy.array([0, -move_amount, 0]))
 
         elif key == b't':
-            self._backface += 1
-            if self._backface > 1:
-                self._backface = 0
-            print("Backface: {0}".format(self._backface))
+            self._option ^= 1
+            print("Option: {0}".format(self._option))
 
         # Wireframe / Solid etc
         elif key == b'1':
