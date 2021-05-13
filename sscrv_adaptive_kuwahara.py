@@ -512,7 +512,7 @@ class Renderer(object):
         self._framebuffer.blit(self._framebuffer2.value, wnd.width, wnd.height, GL_STENCIL_BUFFER_BIT, GL_NEAREST)
         self._framebuffer.blit(self._framebuffer3.value, wnd.width, wnd.height, GL_STENCIL_BUFFER_BIT, GL_NEAREST)
         
-        # Apply SSAO
+        # Apply SSCRV
         with self._framebuffer2.bind():        
             glStencilFunc(GL_EQUAL, 1, 0xFF)
             glStencilOp(GL_KEEP, GL_KEEP, GL_KEEP)

@@ -59,10 +59,14 @@ void main() {
 SSCRV_FRAGMENT_SHADER_SOURCE = """
 #version 460 core
 
+#line 62
+
 layout(location = 0) uniform mat4 inverseProjection;
 layout(location = 1) uniform mat4 projection;
+layout(location = 2) uniform float previousPasses;
 
 layout(binding = 0) uniform sampler2D depthPass;
+layout(binding = 1) uniform sampler2D previousPass;
 
 layout(location = 0) in vec2 uv;
 layout(location = 0) out vec4 outRgba;
@@ -72,81 +76,54 @@ layout(location = 0) out vec4 outRgba;
 // or configured manually.
 #define RADIUS 0.1
 
-// Samples to us
-#ifndef SAMPLES_COUNT
-#   define SAMPLES_COUNT 32
-#endif
+#define SAMPLES_COUNT 8
 
 
-// Vectors which more-or-less evenly sample the hemisphere of (0, 0, 1)
-const vec3 HEMISPHERE_VECTORS[SAMPLES_COUNT] = vec3[SAMPLES_COUNT]
-(
-#if SAMPLES_COUNT == 8
-    vec3(0.998866, 0.000000, 0.047619),
-    vec3(-0.727056, 0.666042, 0.166667),
-    vec3(0.083781, -0.954645, 0.285714),
-    vec3(0.556370, 0.725686, 0.404762),
-    vec3(-0.838814, -0.148374, 0.523810),
-    vec3(0.646305, -0.411126, 0.642857),
-    vec3(-0.168143, 0.625483, 0.761905),
-    vec3(-0.218103, -0.419945, 0.880952)
+#define GOLDEN_RATIO_2PI    10.16640738463051963161901802648439768366367858
+#define GRAZING_ANGLE_DELTA 0.05
 
-#elif SAMPLES_COUNT == 16
-    vec3(0.998866, 0.000000, 0.047619),
-    vec3(-0.733124, 0.671602, 0.107143),
-    vec3(0.086203, -0.982238, 0.166667),
-    vec3(0.592670, 0.773033, 0.226190),
-    vec3(-0.943666, -0.166921, 0.285714),
-    vec3(0.791877, -0.503727, 0.345238),
-    vec3(-0.237388, 0.883071, 0.404762),
-    vec3(-0.408219, -0.786000, 0.464286),
-    vec3(0.800147, 0.292212, 0.523810),
-    vec3(-0.750784, 0.309913, 0.583333),
-    vec3(0.324660, -0.693780, 0.642857),
-    vec3(0.213031, 0.679175, 0.702381),
-    vec3(-0.560388, -0.324756, 0.761905),
-    vec3(0.557009, -0.122457, 0.821429),
-    vec3(-0.272154, 0.387111, 0.880952),
-    vec3(-0.043676, -0.337042, 0.940476)
+#define EASE_IN_JITTERING
 
-#elif SAMPLES_COUNT == 32
-    vec3(0.998866, 0.000000, 0.047619),
-    vec3(-0.735158, 0.673465, 0.077381),
-    vec3(0.086922, -0.990437, 0.107143),
-    vec3(0.602710, 0.786128, 0.136905),
-    vec3(-0.970941, -0.171746, 0.166667),
-    vec3(0.827317, -0.526272, 0.196429),
-    vec3(-0.252876, 0.940687, 0.226190),
-    vec3(-0.445554, -0.857887, 0.255952),
-    vec3(0.900166, 0.328739, 0.285714),
-    vec3(-0.877142, 0.362072, 0.315476),
-    vec3(0.397786, -0.850045, 0.345238),
-    vec3(0.277444, 0.884534, 0.375000),
-    vec3(-0.791168, -0.458498, 0.404762),
-    vec3(0.879653, -0.193389, 0.434524),
-    vec3(-0.509384, 0.724546, 0.464286),
-    vec3(-0.111732, -0.862226, 0.494048),
-    vec3(0.651355, 0.548963, 0.523810),
-    vec3(-0.832091, 0.034410, 0.553571),
-    vec3(0.575735, -0.572933, 0.583333),
-    vec3(-0.036492, 0.789166, 0.613095),
-    vec3(-0.490774, -0.588112, 0.642857),
-    vec3(0.733380, 0.098675, 0.672619),
-    vec3(-0.584288, 0.406532, 0.702381),
-    vec3(0.149500, -0.664542, 0.732143),
-    vec3(0.322019, 0.561965, 0.761905),
-    vec3(-0.582051, -0.185690, 0.791667),
-    vec3(0.517724, -0.239201, 0.821429),
-    vec3(-0.202627, 0.484166, 0.851190),
-    vec3(-0.160157, -0.445278, 0.880952),
-    vec3(0.365616, 0.192157, 0.910714),
-    vec3(-0.328634, 0.086627, 0.940476),
-    vec3(0.130965, -0.203681, 0.970238)
-#else
-#   error "Bad sample count!"
 
-#endif
-);
+// Generates vectors which more-or-less evenly sample the hemisphere of (0, 0, 1)
+// exports vectors in batches of 4.
+// Visualization: https://www.geogebra.org/3d/nfs8r7me
+void make4HemisphereVector(float i,
+                           float jitter,
+                           out vec3 vecs[4])
+{
+    vec4 Z = vec4(i, i+1, i+2, i+3)/(SAMPLES_COUNT+1)
+             + vec4(1/(SAMPLES_COUNT-1));
+
+    // Visually a bit easier on the eyes
+    #ifdef EASE_IN_JITTERING
+         Z = fract(Z + jitter * 0.01);
+
+    // Converges faster by has a bit of a 'popping' like
+    // quality as for all intents and purposes the jittering
+    // is randomized.
+    #else
+         Z = fract(Z + jitter * GOLDEN_RATIO_2PI);
+
+    #endif
+
+         Z = (Z + GRAZING_ANGLE_DELTA) / (1 + GRAZING_ANGLE_DELTA);
+
+
+    vec4 theta = (
+                    vec4(i, i+1, i+2, i+3)
+                    + jitter
+                ) * GOLDEN_RATIO_2PI;
+
+    vec4 R = sqrt(vec4(1) - Z*Z);
+    vec4 X = cos(theta) * R;
+    vec4 Y = sin(theta) * R;
+
+    vecs[0] = vec3(X.x, Y.x, Z.x);
+    vecs[1] = vec3(X.y, Y.y, Z.y);
+    vecs[2] = vec3(X.z, Y.z, Z.z);
+    vecs[3] = vec3(X.w, Y.w, Z.w);
+}
 
 
 void main() {
@@ -182,7 +159,7 @@ void main() {
         // This prevents visible banding that results from the the hemisphere vectors
         // probing the same directions
         // Random Function : https://www.shadertoy.com/view/Xt23Ry
-        float theta = 6.28318530718 * fract(sin(dot(uv, vec2(12.9898,78.233))) * 43758.5453);
+        float theta = 6.28318530718 * fract(sin(dot(N.xy+previousPasses, vec2(12.9898,78.233))) * 43758.5453);
         float ca = cos(theta);
         float sa = sin(theta);
 
@@ -206,46 +183,65 @@ void main() {
 
     float visibility = SAMPLES_COUNT;
 
-    for (uint i = 0; i < SAMPLES_COUNT; ++i) {
-        vec3 projNormal = TBN * HEMISPHERE_VECTORS[i];
-        vec3 projPosition = position.xyz + projNormal * RADIUS;
-
-        vec4 sampleUv      = projection * vec4(projPosition, 1.0);
-             sampleUv.xyz /= sampleUv.w;
-             sampleUv.xy   = sampleUv.xy * 0.5 + 0.5;
-
-        float compareDepth = texture(depthPass, sampleUv.xy).x;
-        
-        // When there is nothing to sample in a region, we adjust the visibility
-        // to bias the convexity, the reason for this is to combat the rather
-        // distracting haloing that seems to be visible.
-        // When attempting to only keep track of which samples pass the test,
-        // the result ends up being a bit noisey and rubbish
-        if(!(compareDepth > 0 && compareDepth < 1))
+    vec3 hemisphereVecs[4];
+    for (float i = 0; i < SAMPLES_COUNT; i+=4) {
+        make4HemisphereVector(i,
+                              previousPasses,
+                              hemisphereVecs);
+        for(uint j=0; j<4; ++j)
         {
-            visibility += 0.5;
-            continue;
+            vec3 projNormal = TBN * hemisphereVecs[j];
+            vec3 projPosition = position.xyz + projNormal * RADIUS;
+
+            vec4 sampleUv      = projection * vec4(projPosition, 1.0);
+                 sampleUv.xyz /= sampleUv.w;
+                 sampleUv.xy   = sampleUv.xy * 0.5 + 0.5;
+
+            float compareDepth = texture(depthPass, sampleUv.xy).x;
+            
+            // When there is nothing to sample in a region, we adjust the visibility
+            // to bias the convexity, the reason for this is to combat the rather
+            // distracting haloing that seems to be visible.
+            // When attempting to only keep track of which samples pass the test,
+            // the result ends up being a bit noisey and rubbish
+            if(!(compareDepth > 0 && compareDepth < 1))
+            {
+                visibility += 0.5;
+                continue;
+            }
+
+            vec4 comparePosition = inverseProjection * vec4(2.0 * sampleUv.xy - 1.0, compareDepth, 1.0);
+            comparePosition /= comparePosition.w;
+
+            float occluded = float(projPosition.z < comparePosition.z);
+            occluded *= 2;
+            occluded -= 1;
+
+            // Attenuate the influence of the occlusion by the distance in viewspace depth
+            // from the original position and sampled position.
+            // (This seems to yield less haloing artefacts than distance or using projPosition).
+            float attenuation = smoothstep(0,
+                                           1,
+                                           RADIUS / abs(position.z - comparePosition.z));
+
+            visibility -= occluded * attenuation;
         }
-
-        vec4 comparePosition = inverseProjection * vec4(2.0 * sampleUv.xy - 1.0, compareDepth, 1.0);
-        comparePosition /= comparePosition.w;
-
-        float occluded = float(projPosition.z < comparePosition.z);
-        occluded *= 2;
-        occluded -= 1;
-
-        // Attenuate the influence of the occlusion by the distance in viewspace depth
-        // from the original position and sampled position.
-        // (This seems to yield less haloing artefacts than distance or using projPosition).
-        float attenuation = smoothstep(0,
-                                       1,
-                                       RADIUS / abs(position.z - comparePosition.z));
-
-        visibility -= occluded * attenuation;
     }
 
     visibility /= SAMPLES_COUNT * 2;
-    outRgba = vec4(visibility);
+
+    if(previousPasses > 0)
+    {
+        outRgba = mix(
+            texture(previousPass, uv),
+            vec4(visibility),
+            (1 / previousPasses)
+        );
+    }
+    else
+    {
+        outRgba = vec4(visibility);
+    }
 }
 
 """
@@ -266,6 +262,17 @@ class Renderer(object):
         self.window.on_keypress = self._keypress
 
         self.main_geom = None
+
+        self.max_temporal_passes = 100
+        self.dirty_base_update = True
+        self.previous_draws = 0
+        self.sscrv_swap_id = 0
+        self.temporal_passes = 0
+
+    def dirty_base(self):
+        self.dirty_base_update = True
+        self.previous_draws = 0
+        self.temporal_passes = 0
 
     def run(self):
         self.window.run()
@@ -318,6 +325,27 @@ class Renderer(object):
             wnd.height
         )
 
+        self._sscrv_col_swaps = [
+            viewport.FramebufferTarget(GL_RGB32F, True),
+            viewport.FramebufferTarget(GL_RGB32F, True),
+        ]
+        self._sscrv_stenil_swaps = [
+            viewport.FramebufferTarget(GL_DEPTH32F_STENCIL8, True),
+            viewport.FramebufferTarget(GL_DEPTH32F_STENCIL8, True),
+        ]
+        self._sscrv_fb_swaps = [
+            viewport.Framebuffer(
+                (self._sscrv_col_swaps[0], self._sscrv_stenil_swaps[0]),
+                wnd.width,
+                wnd.height
+            ),
+            viewport.Framebuffer(
+                (self._sscrv_col_swaps[1], self._sscrv_stenil_swaps[1]),
+                wnd.width,
+                wnd.height
+            ),
+        ]
+
         # Second framebuffer so we can see things with renderdoc
         self._framebuffer2_col = viewport.FramebufferTarget(GL_RGB32F, True)
         self._framebuffer2_depth = viewport.FramebufferTarget(GL_DEPTH32F_STENCIL8, True)
@@ -337,22 +365,25 @@ class Renderer(object):
 
     def _draw(self, wnd):
         # Draw stencil-depth
-        with self._framebuffer.bind():
-            glStencilFunc(GL_ALWAYS, 1, 0xFF)
-            glStencilOp(GL_KEEP, GL_KEEP, GL_REPLACE)
-            glStencilMask(0xFF)
-            glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT | GL_STENCIL_BUFFER_BIT)
+        if self.dirty_base_update:
+            with self._framebuffer.bind():
+                glStencilFunc(GL_ALWAYS, 1, 0xFF)
+                glStencilOp(GL_KEEP, GL_KEEP, GL_REPLACE)
+                glStencilMask(0xFF)
+                glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT | GL_STENCIL_BUFFER_BIT)
 
-            glUseProgram(self._draw_depth_program)
-            glUniformMatrix4fv(0, 1, GL_FALSE, (self._main_geom_model * self.camera.view_projection).flatten())
-            self.main_geom.draw()
+                glUseProgram(self._draw_depth_program)
+                glUniformMatrix4fv(0, 1, GL_FALSE, (self._main_geom_model * self.camera.view_projection).flatten())
+                self.main_geom.draw()
 
-        # Akward GL gubbins + me not bothering to make targets of a framebuffer
-        # interchangable
-        self._framebuffer.blit(self._framebuffer2.value, wnd.width, wnd.height, GL_STENCIL_BUFFER_BIT, GL_NEAREST)
-        
+            # Akward GL gubbins + me not bothering to make targets of a framebuffer
+            # interchangable
+            for swap in self._sscrv_fb_swaps:
+                self._framebuffer.blit(swap.value, wnd.width, wnd.height, GL_STENCIL_BUFFER_BIT, GL_NEAREST)
+            self.dirty_base_update = False
+
         # Apply SSCRV
-        with self._framebuffer2.bind():        
+        with self._sscrv_fb_swaps[self.sscrv_swap_id].bind():
             glStencilFunc(GL_EQUAL, 1, 0xFF)
             glStencilOp(GL_KEEP, GL_KEEP, GL_KEEP)
             glStencilMask(0x00)
@@ -361,17 +392,33 @@ class Renderer(object):
             glUseProgram(self._sscrv_program)
             glUniformMatrix4fv(0, 1, GL_FALSE, self.camera.projection.I.flatten())
             glUniformMatrix4fv(1, 1, GL_FALSE, self.camera.projection.flatten())
+            glUniform1f(2, float(self.temporal_passes))
             glBindTextureUnit(0, self._framebuffer_depth.texture)
+            glBindTextureUnit(1, self._sscrv_col_swaps[self.sscrv_swap_id^1].texture)
             glDrawArrays(GL_TRIANGLES, 0, 3)
 
         # Copy to back
         glClear(GL_COLOR_BUFFER_BIT)
-        self._framebuffer2.blit_to_back(wnd.width, wnd.height, GL_COLOR_BUFFER_BIT, GL_NEAREST)
+        self._sscrv_fb_swaps[self.sscrv_swap_id].blit_to_back(
+            wnd.width,
+            wnd.height,
+            GL_COLOR_BUFFER_BIT,
+            GL_NEAREST
+        )
+
+        # Change swap id and refresh the window to begin another pass
+        # if it's under what we allow for our budget
+        self.sscrv_swap_id ^= 1
+        self.temporal_passes += 1
+        if self.temporal_passes < self.max_temporal_passes:
+            wnd.redraw()
 
 
     def _resize(self, wnd, width, height):
         self._framebuffer.resize(width, height)
-        self._framebuffer2.resize(width, height)
+        self._sscrv_fb_swaps[0].resize(width, height)
+        self._sscrv_fb_swaps[1].resize(width, height)
+        self.dirty_base()
         glViewport(0, 0, width, height)
         self.camera.set_aspect(width/height)
 
@@ -407,6 +454,7 @@ class Renderer(object):
         else:
             return
 
+        self.dirty_base()
         wnd.redraw()
 
     def _drag(self, wnd, x, y, button):
@@ -444,7 +492,7 @@ class Renderer(object):
         M *= N
 
         self.camera.append_3x3_transform(M)
-
+        self.dirty_base()
         wnd.redraw()
 
 
