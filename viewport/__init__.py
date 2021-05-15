@@ -1,7 +1,12 @@
 
 from . camera import Camera
 from . extensions import get_gl_extensions, has_gl_extension
-from . framebuffer import Framebuffer, FramebufferTarget
+from . framebuffer import (
+    Framebuffer,
+    FramebufferTarget,
+    CubemapFramebuffer,
+    CubemapFramebufferTarget,
+)
 from . geometry import (
     StaticGeometry,
     StaticCombinedGeometry,

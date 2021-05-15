@@ -95,6 +95,59 @@ class FramebufferTarget(object):
         return self._ptr.value
 
 
+class CubemapFramebufferTarget(FramebufferTarget):
+
+    def __init__(self, pixel_type, custom_texture_settings=None):
+        super(CubemapFramebufferTarget, self).__init__(
+            pixel_type=pixel_type,
+            make_texture=True,
+            custom_texture_settings=custom_texture_settings)
+        self._bound_layer = None
+
+    def _create(self, framebuffer, width, height):
+        self._destroy()
+        glCreateTextures(GL_TEXTURE_CUBE_MAP, 1, self._ptr)
+        glTextureStorage2D(self.value, 1, self.pixel_type, width, height)
+
+        if self.custom_texture_settings:
+            for pname, pvalue in self.custom_texture_settings.items():
+                glTextureParameteri(self.value, pname, pvalue)
+        else:
+            glTextureParameteri(self.value, GL_TEXTURE_WRAP_S, GL_REPEAT)
+            glTextureParameteri(self.value, GL_TEXTURE_WRAP_T, GL_REPEAT)
+            glTextureParameteri(self.value, GL_TEXTURE_WRAP_R, GL_REPEAT)
+            glTextureParameteri(self.value, GL_TEXTURE_MIN_FILTER, GL_LINEAR)
+            glTextureParameteri(self.value, GL_TEXTURE_MAG_FILTER, GL_LINEAR)
+        glNamedFramebufferTexture(framebuffer, self._attachment_id, self.value, 0)
+        self._intitialized = True
+
+    def _bind_layer(self, framebuffer, layer):
+        if self._bound_layer != layer:
+            # This doesn't seem to work correct with (atleast my) Intel driver, throwing an invalid
+            # operation.
+            if 0:
+                glNamedFramebufferTextureLayer(framebuffer, self._attachment_id, self.value, 0, layer)
+            
+            # falling back to old GL
+            else:
+                glFramebufferTexture2D(
+                    GL_FRAMEBUFFER,
+                    self._attachment_id,
+                    GL_TEXTURE_CUBE_MAP_POSITIVE_X+layer,
+                    self.value,
+                    0
+                )
+
+        self._bound_layer 
+
+    def _bind(self, framebuffer, layer=None):
+        if layer is not None:
+            self._bind_layer(framebuffer, layer)
+        elif self._bound_layer is not None:
+            glNamedFramebufferTexture(framebuffer, self._attachment_id, self.value, 0)
+            self._bound_layer = None
+
+
 class Framebuffer(object):
 
     def __init__(self, render_targets, width, height):
@@ -180,3 +233,16 @@ class Framebuffer(object):
             filter_
         )
 
+
+class CubemapFramebuffer(Framebuffer):
+
+    @contextmanager
+    def bind(self, layer=None):
+        """Bind the framebuffer to be drawn too."""
+        glBindFramebuffer(GL_FRAMEBUFFER, self.value)
+        for render_target in self._render_targets:
+            render_target._bind(self.value, layer)
+        glDrawBuffers(len(self._colour_attachments), self._colour_attachments)
+        yield
+        glBindFramebuffer(GL_FRAMEBUFFER, 0)
+        glDrawBuffer(GL_BACK)

@@ -97,7 +97,7 @@ void main()
         }
     }
 
-    // Writeback to the global able
+    // Writeback to the global table
     barrier();
     atomicAdd(histogramGlobal[gl_LocalInvocationIndex], histogramLocal[gl_LocalInvocationIndex]);
 }

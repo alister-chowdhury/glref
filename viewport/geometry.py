@@ -62,6 +62,7 @@ class StaticGeometry(object):
             glVertexArrayAttribBinding(self._vao, idx, 0)
             offset += 4 * count
 
+        self.vertices = vertices
         self.index_count = len(indices.ravel())
 
     def bind(self):
@@ -173,6 +174,7 @@ class StaticCombinedGeometry(object):
         # Simply enabling an extra attrib magically fixes it for reasons I am unsure of.
         glEnableVertexArrayAttrib(self._vao, len(vertex_attrib_sizes))
 
+        self.vertices = combined_vertices
         self.index_counts = counts
 
     def bind(self):
