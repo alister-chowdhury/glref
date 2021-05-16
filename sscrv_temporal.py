@@ -97,15 +97,21 @@ void make4HemisphereVector(float i,
 
     // Visually a bit easier on the eyes
     #ifdef EASE_IN_JITTERING
-         Z = fract(Z + jitter * 0.01);
+         Z = fract(Z + jitter * 0.01 + GOLDEN_RATIO_2PI);
 
     // Converges faster by has a bit of a 'popping' like
     // quality as for all intents and purposes the jittering
     // is randomized.
     #else
-         Z = fract(Z + jitter * GOLDEN_RATIO_2PI);
+         Z = fract(Z + jitter * GOLDEN_RATIO_2PI + GOLDEN_RATIO_2PI);
 
     #endif
+
+        // For both ease-in and randomized jittering we are adding
+        // GOLDEN_RATIO_2PI, for reasons I've yet to discover
+        // it prevents this visible change in luminance where everything
+        // seems to start of darker and then converge towards something
+        // brighter.
 
          Z = (Z + GRAZING_ANGLE_DELTA) / (1 + GRAZING_ANGLE_DELTA);
 
@@ -197,6 +203,8 @@ void main() {
                  sampleUv.xyz /= sampleUv.w;
                  sampleUv.xy   = sampleUv.xy * 0.5 + 0.5;
 
+            sampleUv.xy = clamp(sampleUv.xy, vec2(0), vec2(1));
+
             float compareDepth = texture(depthPass, sampleUv.xy).x;
             
             // When there is nothing to sample in a region, we adjust the visibility
@@ -235,7 +243,7 @@ void main() {
         outRgba = mix(
             texture(previousPass, uv),
             vec4(visibility),
-            (1 / previousPasses)
+            (1 / (previousPasses+1))
         );
     }
     else
@@ -265,13 +273,11 @@ class Renderer(object):
 
         self.max_temporal_passes = 100
         self.dirty_base_update = True
-        self.previous_draws = 0
         self.sscrv_swap_id = 0
         self.temporal_passes = 0
 
     def dirty_base(self):
         self.dirty_base_update = True
-        self.previous_draws = 0
         self.temporal_passes = 0
 
     def run(self):
