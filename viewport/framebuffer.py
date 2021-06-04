@@ -43,6 +43,8 @@ class FramebufferTarget(object):
                 self.pixel_type = GL_DEPTH24_STENCIL8
 
         self._attachment_id = None
+        self._width = 0
+        self._height = 0
 
     def __del__(self):
         self._destroy()
@@ -64,6 +66,8 @@ class FramebufferTarget(object):
 
     def _create(self, framebuffer, width, height):
         self._destroy()
+        self._width = width
+        self._height = height
         if self.make_texture:
             glCreateTextures(GL_TEXTURE_2D, 1, self._ptr)
             glTextureStorage2D(self.value, 1, self.pixel_type, width, height)
@@ -93,6 +97,64 @@ class FramebufferTarget(object):
         if not self.make_texture:
             return None
         return self._ptr.value
+
+
+class ProxyFramebufferTarget(object):
+    """Proxy framebuffer target, must be used AFTER the source has been initialized / resized."""
+
+    def __init__(self, target):
+        self._target = target
+        self._attachment_id = None
+
+    def _set_attachment_id(self, idx):
+        if self._attachment_id is not None:
+            raise RuntimeError(
+                "ProxyFramebufferTarget already attached to a Framebuffer"
+            )
+        self._attachment_id = idx
+
+    def _create(self, framebuffer, width, height):
+        if width != self._target._width and height != self._target._height:
+            raise RuntimeError(
+                "ProxyFramebufferTarget width/height don't match source FramebufferTarget"
+            )
+        if self.make_texture:
+            glNamedFramebufferTexture(framebuffer, self._attachment_id, self.value, 0)
+        else:
+            glNamedFramebufferRenderbuffer(framebuffer, self._attachment_id, GL_RENDERBUFFER, self.value)
+
+    @property
+    def pixel_type(self):
+        return self._target.pixel_type
+
+    @property
+    def make_texture(self):
+        return self._target.make_texture
+
+    @property
+    def is_depth(self):
+        return self._target.is_depth
+
+    @property
+    def is_stencil(self):
+        return self._target.is_stencil
+
+    @property
+    def is_depth_stencil(self):
+        return self._target.is_depth_stencil
+
+    @property
+    def custom_texture_settings(self):
+        return self._target.custom_texture_settings
+
+    @property
+    def value(self):
+        return self._target.value
+
+    @property
+    def texture(self):
+        return self._target.texture
+
 
 
 class CubemapFramebufferTarget(FramebufferTarget):

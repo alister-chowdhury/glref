@@ -4,6 +4,7 @@ from . extensions import get_gl_extensions, has_gl_extension
 from . framebuffer import (
     Framebuffer,
     FramebufferTarget,
+    ProxyFramebufferTarget,
     CubemapFramebuffer,
     CubemapFramebufferTarget,
 )
