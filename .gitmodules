@@ -1,0 +1,6 @@
+[submodule "tools/thirdparty/msdfgen"]
+	path = tools/thirdparty/msdfgen
+	url = https://github.com/Chlumsky/msdfgen.git
+[submodule "tools/thirdparty/docopt.cpp"]
+	path = tools/thirdparty/docopt.cpp
+	url = https://github.com/docopt/docopt.cpp.git
