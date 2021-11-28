@@ -1,0 +1,308 @@
+#version 460 core
+
+
+
+layout(local_size_x=8, local_size_y=8) in;
+
+
+#define SHOW_MISSING_TILES 1
+#define VISUALIZE_DESIRED_TILE 0
+
+
+writeonly layout(binding=0)             uniform image2D     sceneCol;
+readonly  layout(binding=1, rg32f)      uniform image2D     screenUvs;
+readonly  layout(binding=2, rgba32f)    uniform image2D     screenDerivs;
+layout(binding=3)                       uniform sampler2D   sceneZ;
+
+
+readonly layout(binding=4, rg32ui)      uniform uimage2D udimInfoStart;
+readonly layout(std430, binding=5)      buffer udimInfo_ { uint udimInfo[];};
+
+// Should be able to do a uimage2DArray, but dunno how to bind that yet
+layout (binding=6)                      uniform usampler2DArray indirectTexture;
+layout (binding=7)                      uniform sampler2DArray virtualTexture;
+
+
+layout(std430, binding=8)               buffer feedbackIter_ { uint feedbackIter;};
+writeonly layout(std430, binding=9)     buffer feedbackStorage_ { uint feedbackStorge[];};
+
+
+layout(location = 0) uniform ivec4 udimOffset;
+layout(location = 1) uniform ivec2 screenSize;
+layout(location = 2) uniform vec2  inverseVirtualTextureSize;
+
+
+uint packVtFeedback(uint mip, uvec2 tileId)
+{
+    return (
+        tileId.x
+        | (tileId.y << 10)
+        | (mip << 20)
+    );
+}
+
+
+float desiredMipLevel(vec2 uv, vec4 derivs, vec2 dim)
+{
+    // Multiply the resolution AFTER the deriv is calculated
+    // otherwise it can create odd artefacts around udim borders
+    vec2  dx_vtc  = derivs.xy * dim;
+    vec2  dy_vtc  = derivs.zw * dim;
+    float delta_max_sqr = max(dot(dx_vtc, dx_vtc), dot(dy_vtc, dy_vtc));
+    return 0.5 * log2(delta_max_sqr);
+}
+
+
+void addFeedbackEntry(uvec2 udimAndTileData)
+{
+    uint idx = atomicAdd(feedbackIter, 1);
+    // Hardcoded limit for now
+    if(idx < 1024 * 1024)
+    {
+        feedbackStorge[2 * idx + 0] = udimAndTileData.x;
+        feedbackStorge[2 * idx + 1] = udimAndTileData.y;
+    }
+}
+
+
+// Shared memory version, a subgroup version should also be possible.
+
+shared uvec2 localWritebackValues[8 * 8];
+void addFeedback(uvec2 udimAndTileData)
+{
+    // Each thread writes back its desired tile info to shared memory.
+    // Then we iterate every possible value, if it matches up to what we had
+    // and the index is the local group index then it is kept, otherwise it is
+    // set to a invalid value.
+    //
+    // This means the first thread to have a unique value is the one that will
+    // write it back to the feedback buffer.
+    localWritebackValues[gl_LocalInvocationIndex] = udimAndTileData;
+    memoryBarrierShared();
+    barrier();
+
+    for(uint idx = 0; idx < (8 * 8); ++idx)
+    {
+        if(localWritebackValues[idx] == udimAndTileData)
+        {
+            if(idx != gl_LocalInvocationIndex)
+            {
+                udimAndTileData = uvec2(0xffffffff);
+            }
+            break;
+        }
+    }
+
+    if(udimAndTileData.x != 0xffffffff && udimAndTileData.y != 0xffffffff)
+    {
+        addFeedbackEntry(udimAndTileData);
+    }
+}
+
+
+ivec3 getMipOffset(uint udimInfoOffset, uint mip)
+{
+    uint packedMipAddress = udimInfo[udimInfoOffset + 3 + mip];
+    uint mipStartX = bitfieldExtract(packedMipAddress, 0, 12);
+    uint mipStartY = bitfieldExtract(packedMipAddress, 12, 12);
+    uint layer = bitfieldExtract(packedMipAddress, 24, 8);
+    return ivec3(mipStartX, mipStartY, layer);
+}
+
+
+
+struct VtData
+{
+    uint udimInfoOffset;
+    vec2 uv;
+    uint currentMip;
+    uvec3 udimDimensionAndMip;
+    ivec3 indirectionXyz;
+    vec2 innerTileCoord;
+};
+
+
+bool initializeVtLookup(inout VtData vtdata)
+{
+    ivec2 coord = ivec2(gl_GlobalInvocationID.xy);
+    bool validCoord = all(lessThan(coord, screenSize));
+
+    if(validCoord)
+    {
+        float zDepth = texelFetch(sceneZ, coord, 0).x;
+        validCoord = (zDepth > 0) && (zDepth < 1);
+    }
+
+    vtdata.uv = imageLoad(screenUvs, coord).xy;
+
+    ivec2 udim = ivec2(vtdata.uv) + udimOffset.xy;
+    vtdata.udimInfoOffset = validCoord ? imageLoad(udimInfoStart, udim).x : 0xffffffff;
+
+    vtdata.uv = fract(vtdata.uv);
+
+    // Invalid UDIM!
+    bool invalidUdim = (
+        vtdata.udimInfoOffset == 0xffffffff
+        || any(lessThan(udim, ivec2(0)))
+        || any(greaterThanEqual(udim, udimOffset.zw))
+    );
+
+    uvec2 tileRequest;
+
+    if(invalidUdim)
+    {
+        tileRequest = uvec2(0xffffffff);
+        vtdata.currentMip = 0;
+        vtdata.udimDimensionAndMip = uvec3(0);
+        vtdata.indirectionXyz = ivec3(0);
+        vtdata.innerTileCoord = vec2(0);
+    }
+    else
+    {
+        uint width = udimInfo[vtdata.udimInfoOffset + 0];
+        uint height = udimInfo[vtdata.udimInfoOffset + 1];
+        uint mips = udimInfo[vtdata.udimInfoOffset + 2];
+        vtdata.udimDimensionAndMip = uvec3(width, height, mips);
+
+        vec4 uvDerivs = imageLoad(screenDerivs, coord);
+        float targetMip = desiredMipLevel(
+            vtdata.uv,
+            uvDerivs,
+            vec2(vtdata.udimDimensionAndMip.xy)
+        );
+
+        vtdata.currentMip = min(mips-1, uint(targetMip + 0.5)); // round to nearest mip
+        width = max(1, width >> vtdata.currentMip);
+        height = max(1, height >> vtdata.currentMip);
+
+        vec2 texCoord = vtdata.uv * vec2(width, height);
+        uvec2 pixelCoord = uvec2(texCoord);
+        uvec2 tileId = pixelCoord / 64;
+        uint tileRequestInfo = packVtFeedback(vtdata.currentMip, tileId);
+        uint udimId = (udim.x << 16) | udim.y;
+        // What we're going to request be streamed in, if not already done so
+        tileRequest = uvec2(udimId, tileRequestInfo);
+
+        ivec3 start = getMipOffset(vtdata.udimInfoOffset, vtdata.currentMip);
+        start.xy += ivec2(tileId);
+
+        vtdata.indirectionXyz = start;
+        vtdata.innerTileCoord = vec2(pixelCoord & 63) + fract(texCoord);
+
+    }
+
+    addFeedback(tileRequest);
+
+    return !invalidUdim;
+}
+
+
+// Hash Functions for GPU Rendering 2020, Jarzynski & Olano
+uvec3 pcg3d(uvec3 v)
+{
+    v = v * 1664525 + 1013904223;
+    v.x += v.y * v.z;
+    v.y += v.z * v.x;
+    v.z += v.x * v.y;
+    v ^= v >> 16;
+    
+    v.x += v.y * v.z;
+    v.y += v.z * v.x;
+    v.z += v.x * v.y;
+    return v;
+}
+
+
+vec3 hue2rgb(float H)
+{
+    float R = abs(H * 6 - 3) - 1;
+    float G = 2 - abs(H * 6 - 2);
+    float B = 2 - abs(H * 6 - 4);
+    return clamp(vec3(R,G,B), 0, 1);
+}
+
+
+
+void main()
+{
+    vec4 outCol = vec4(0);
+    VtData vtdata;
+
+    if(initializeVtLookup(vtdata))
+    {
+
+#if VISUALIZE_DESIRED_TILE
+
+    ivec2 coord = ivec2(gl_GlobalInvocationID.xy);
+    bool validCoord = all(lessThan(coord, screenSize));
+    if(validCoord)
+    {
+        float hue = float(pcg3d(uvec3(vtdata.indirectionXyz)).x & 0xffff) / float(0xffff);
+        imageStore(sceneCol, coord, vec4(hue2rgb(hue), 0));
+    }
+
+    return;
+#endif
+
+        uint tileAddress;
+
+        for(;;)
+        {
+            tileAddress = texelFetch(indirectTexture, vtdata.indirectionXyz, 0).x;
+            
+            // Missing tile, go down the mip-chain and try again
+            if(tileAddress == 0xffff)
+            {
+                // End of the line
+                if(++vtdata.currentMip >= vtdata.udimDimensionAndMip.z)
+                {
+                    break;
+                }
+
+                uint width = max(1, vtdata.udimDimensionAndMip.x >> vtdata.currentMip);
+                uint height = max(1, vtdata.udimDimensionAndMip.y >> vtdata.currentMip);
+
+                vec2 texCoord = vtdata.uv * vec2(width, height);
+                uvec2 pixelCoord = uvec2(texCoord);
+                uvec2 tileId = pixelCoord / 64;
+                ivec3 start = getMipOffset(vtdata.udimInfoOffset, vtdata.currentMip);
+                start.xy += ivec2(tileId);
+                vtdata.indirectionXyz = start;
+                vtdata.innerTileCoord = vec2(pixelCoord & 63) + fract(texCoord);
+                continue;
+            }
+            break;
+        }
+
+        if(tileAddress != 0xffff)
+        {
+            uint tileX = bitfieldExtract(tileAddress, 0, 7);
+            uint tileY = bitfieldExtract(tileAddress, 7, 7);
+            uint tileLayer = bitfieldExtract(tileAddress, 14, 2);
+            vec3 vtUvw = vec3(
+                vec2(uvec2(tileX, tileY) * 66 + 1) * inverseVirtualTextureSize,
+                float(tileLayer)
+            );
+            outCol = texture(virtualTexture, vtUvw);
+        }
+
+#if SHOW_MISSING_TILES
+        else
+        {
+            // Missing tile debug colour
+            outCol = vec4(1, 0, 0, 0);
+        }
+#endif
+
+    }
+
+    ivec2 coord = ivec2(gl_GlobalInvocationID.xy);
+    bool validCoord = all(lessThan(coord, screenSize));
+
+    if(validCoord)
+    {
+        imageStore(sceneCol, coord, outCol);
+    }
+}
+
+
