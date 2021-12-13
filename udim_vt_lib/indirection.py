@@ -45,9 +45,11 @@ class UdimIndirectionBuilder(object):
         # Allocate the udim info here (even if it's populated later)
         # and write back into udim_info_start
         udim_info = []
+        self.offset_udim_to_image = {}
         for entry in self._udim_entries:
             x = entry.udim_xy[0] - min_x
             y = entry.udim_xy[1] - min_y
+            self.offset_udim_to_image[(x << 16) | y] = entry
             self.udim_info_start[y, x] = len(udim_info)
 
             image = entry.image

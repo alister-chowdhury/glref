@@ -1,0 +1,304 @@
+#version 460 core
+
+
+layout(local_size_x=32) in;
+
+
+#include "timer_samples.glslh"
+#include "number_encoding.glslh"
+
+
+#if TIMER_SAMPLES_DATA_SIZE != 256
+    #error "TIMER_SAMPLES_DATA_SIZE needs to be 256 for this to work!"
+#endif
+
+#ifndef UPDATE_TEXT_ENCODING
+#define UPDATE_TEXT_ENCODING 1
+#endif
+
+
+// Try to use min / max wave ops
+#extension GL_KHR_shader_subgroup_arithmetic : enable
+
+
+layout(location = 0)        uniform float newSample;
+layout(std430, binding = 0) buffer timerSamplesData_
+{
+    TimerSamplesData timerSamplesData;
+};
+
+
+// Wave ops version, we're assuming that the wave size is >= 32 (Intel, AMD, NVIDIA)
+// which means we can avoid doing any LDS work.
+#if GL_KHR_shader_subgroup_arithmetic
+
+bool canCalcWithWaveOps()
+{
+    return gl_SubgroupSize >= 32;
+}
+
+
+float calcMinWave(vec4 valuesA, vec4 valuesB)
+{
+    vec4 tmpStorage = min(valuesA, valuesB);
+    tmpStorage.xy = min(tmpStorage.xy, tmpStorage.zw);
+    tmpStorage.x = min(tmpStorage.x, tmpStorage.y);
+    return subgroupMin(tmpStorage.x);
+}
+
+
+float calcMaxWave(vec4 valuesA, vec4 valuesB)
+{
+    vec4 tmpStorage = max(valuesA, valuesB);
+    tmpStorage.xy = max(tmpStorage.xy, tmpStorage.zw);
+    tmpStorage.x = max(tmpStorage.x, tmpStorage.y);
+    return subgroupMax(tmpStorage.x);
+}
+
+
+float calcAvgWave(vec4 valuesA, vec4 valuesB)
+{
+    vec4 tmpStorage = valuesA + valuesB;
+    tmpStorage.xy += tmpStorage.zw;
+    tmpStorage.x = tmpStorage.y;
+    return subgroupAdd(tmpStorage.x) * (1.0 / 256.0);
+}
+
+#else
+
+bool canCalcWithWaveOps() { return false; }
+float calcMinWave(vec4 valuesA, vec4 valuesB) { return 0; }
+float calcMaxWave(vec4 valuesA, vec4 valuesB) { return 0; }
+float calcAvgWave(vec4 valuesA, vec4 valuesB) { return 0; }
+
+#endif
+
+
+shared float scratch[32];
+
+float calcMinLds(vec4 valuesA, vec4 valuesB)
+{
+    vec4 tmpStorage = min(valuesA, valuesB);
+    tmpStorage.xy = min(tmpStorage.xy, tmpStorage.zw);
+    tmpStorage.x = min(tmpStorage.x, tmpStorage.y);
+
+    scratch[gl_LocalInvocationIndex] = tmpStorage.x;
+    memoryBarrierShared();
+    barrier();
+
+    if(gl_LocalInvocationIndex < 16)
+    {
+        tmpStorage.x = min(tmpStorage.x, scratch[16 + gl_LocalInvocationIndex]);
+        scratch[gl_LocalInvocationIndex] = tmpStorage.x;
+    }
+    memoryBarrierShared();
+    barrier();
+
+    if(gl_LocalInvocationIndex < 8)
+    {
+        tmpStorage.x = min(tmpStorage.x, scratch[8 + gl_LocalInvocationIndex]);
+        scratch[gl_LocalInvocationIndex] = tmpStorage.x;
+    }
+    memoryBarrierShared();
+    barrier();
+
+    if(gl_LocalInvocationIndex < 4)
+    {
+        tmpStorage.x = min(tmpStorage.x, scratch[4 + gl_LocalInvocationIndex]);
+        scratch[gl_LocalInvocationIndex] = tmpStorage.x;
+    }
+    memoryBarrierShared();
+    barrier();
+
+    return min(
+        min(scratch[0], scratch[1]),
+        min(scratch[2], scratch[3])
+    );
+}
+
+
+float calcMaxLds(vec4 valuesA, vec4 valuesB)
+{
+    vec4 tmpStorage = max(valuesA, valuesB);
+    tmpStorage.xy = max(tmpStorage.xy, tmpStorage.zw);
+    tmpStorage.x = max(tmpStorage.x, tmpStorage.y);
+
+    scratch[gl_LocalInvocationIndex] = tmpStorage.x;
+    memoryBarrierShared();
+    barrier();
+
+    if(gl_LocalInvocationIndex < 16)
+    {
+        tmpStorage.x = max(tmpStorage.x, scratch[16 + gl_LocalInvocationIndex]);
+        scratch[gl_LocalInvocationIndex] = tmpStorage.x;
+    }
+    memoryBarrierShared();
+    barrier();
+
+    if(gl_LocalInvocationIndex < 8)
+    {
+        tmpStorage.x = max(tmpStorage.x, scratch[8 + gl_LocalInvocationIndex]);
+        scratch[gl_LocalInvocationIndex] = tmpStorage.x;
+    }
+    memoryBarrierShared();
+    barrier();
+
+    if(gl_LocalInvocationIndex < 4)
+    {
+        tmpStorage.x = max(tmpStorage.x, scratch[4 + gl_LocalInvocationIndex]);
+        scratch[gl_LocalInvocationIndex] = tmpStorage.x;
+    }
+    memoryBarrierShared();
+    barrier();
+
+    return max(
+        max(scratch[0], scratch[1]),
+        max(scratch[2], scratch[3])
+    );
+}
+
+
+float calcAvgLds(vec4 valuesA, vec4 valuesB)
+{
+    vec4 tmpStorage = valuesA + valuesB;
+    tmpStorage.xy += tmpStorage.zw;
+    tmpStorage.x += tmpStorage.y;
+
+    scratch[gl_LocalInvocationIndex] = tmpStorage.x;
+    memoryBarrierShared();
+    barrier();
+
+    if(gl_LocalInvocationIndex < 16)
+    {
+        tmpStorage.x += scratch[16 + gl_LocalInvocationIndex];
+        scratch[gl_LocalInvocationIndex] = tmpStorage.x;
+    }
+    memoryBarrierShared();
+    barrier();
+
+    if(gl_LocalInvocationIndex < 8)
+    {
+        tmpStorage.x += scratch[8 + gl_LocalInvocationIndex];
+        scratch[gl_LocalInvocationIndex] = tmpStorage.x;
+    }
+    memoryBarrierShared();
+    barrier();
+
+    if(gl_LocalInvocationIndex < 4)
+    {
+        tmpStorage.x += scratch[4 + gl_LocalInvocationIndex];
+        scratch[gl_LocalInvocationIndex] = tmpStorage.x;
+    }
+    memoryBarrierShared();
+    barrier();
+
+    return (
+        scratch[0] + scratch[1]
+        + scratch[2] + scratch[3]
+    ) * (1.0 / 256.0);
+}
+
+
+vec3 calcMinMaxAvg()
+{
+    vec4 valuesA = vec4(
+        timerSamplesData.samples[gl_LocalInvocationIndex * 8],
+        timerSamplesData.samples[gl_LocalInvocationIndex * 8 + 1],
+        timerSamplesData.samples[gl_LocalInvocationIndex * 8 + 2],
+        timerSamplesData.samples[gl_LocalInvocationIndex * 8 + 3]
+    );
+    vec4 valuesB = vec4(
+        timerSamplesData.samples[gl_LocalInvocationIndex * 8 + 4],
+        timerSamplesData.samples[gl_LocalInvocationIndex * 8 + 5],
+        timerSamplesData.samples[gl_LocalInvocationIndex * 8 + 6],
+        timerSamplesData.samples[gl_LocalInvocationIndex * 8 + 7]
+    );
+
+
+    if(canCalcWithWaveOps())
+    {
+        return vec3(
+            calcMinWave(valuesA, valuesB),
+            calcMaxWave(valuesA, valuesB),
+            calcAvgWave(valuesA, valuesB)
+        );
+    }
+    else
+    {
+        return vec3(
+            calcMinLds(valuesA, valuesB),
+            calcMaxLds(valuesA, valuesB),
+            calcAvgLds(valuesA, valuesB)
+        );
+    }
+}
+
+
+void main()
+{
+    vec4    header = timerSamplesData.header;
+    uint    writeBackId = TRUNCATE_SAMPLES_DATA_INDEX(floatBitsToUint(header.w) + 1);
+    float   lastValue = timerSamplesData.samples[writeBackId];
+            header.w = uintBitsToFloat(writeBackId);
+
+    groupMemoryBarrier();
+    if(gl_LocalInvocationIndex == 0)
+    {
+        timerSamplesData.samples[writeBackId] = newSample;
+    }
+    
+
+    // If we're replacing a value that was the old minimum / maximum
+    // and our value would cause that value to be ambiguous, we need
+    // to search for a new approriate value.
+    // Additionally, if our average looks a bit off, we should realculate
+    // it too.
+    bool needsFullUpdate = (
+        ((header.x == lastValue) && (newSample > lastValue))
+        || ((header.y == lastValue)  && (newSample < lastValue))
+        || (isnan(header.z) || isinf(header.z))
+    );
+
+
+    if(!needsFullUpdate)
+    {
+        if(lastValue != newSample)
+        {
+            header.x = min(header.x, newSample);
+            header.y = max(header.y, newSample);
+            header.z += (newSample - lastValue) * (1.0 / 256.0);
+        }
+    }
+    else
+    {
+        // Need to wait for the sample value to be written back
+        groupMemoryBarrier();
+        barrier();
+        header.xyz = calcMinMaxAvg();
+    }
+
+    if(gl_LocalInvocationIndex == 0)
+    {
+        timerSamplesData.header = header;
+    }
+
+#if UPDATE_TEXT_ENCODING
+
+    // Encode numbers to text as part of the update
+    if(gl_LocalInvocationIndex < 4)
+    {
+        float targetNumber;
+        switch(gl_LocalInvocationIndex)
+        {
+            case 0: targetNumber = header.x; break;
+            case 1: targetNumber = header.y; break;
+            case 2: targetNumber = header.z; break;
+            default: targetNumber = newSample; break;
+        }
+
+        timerSamplesData.textEncoded[gl_LocalInvocationIndex] = encodeNumber(targetNumber);
+    }
+
+#endif
+
+}

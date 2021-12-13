@@ -18,6 +18,9 @@ from . program import (
     generate_shader_program,
     generate_shader_program_from_files
 )
+
+from . shader_loader import load_shader_source
+
 from . window import Window
 
 from . misc import make_reflection_matrix

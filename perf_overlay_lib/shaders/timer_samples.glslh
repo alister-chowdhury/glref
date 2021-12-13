@@ -1,0 +1,20 @@
+#ifndef TIMER_SAMPLES_GLSL_H
+#define TIMER_SAMPLES_GLSL_H
+
+
+#define TIMER_SAMPLES_DATA_SIZE        256
+#define TRUNCATE_SAMPLES_DATA_INDEX(x) (x & 255)
+
+
+struct TimerSamplesData
+{
+    // TODO: This could keep track of the min / max indices, so a full search
+    //       wouldn't be needed if the replacing value is the same?
+    vec4    header; // .x=min, .y=max, z.=avg, .w=counter index (as int)
+    uint    textEncoded[4]; // 0 = min, 1 = max, 2 = avg, 3 = last value
+    float   samples[TIMER_SAMPLES_DATA_SIZE];
+};
+
+
+
+#endif

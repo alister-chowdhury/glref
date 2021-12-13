@@ -2,6 +2,7 @@ import viewport
 
 
 from math import cos, sin, pi
+import time
 
 import numpy
 
@@ -9,6 +10,7 @@ from OpenGL.GL import *
 
 
 import udim_vt_lib
+import perf_overlay_lib
 
 
 
@@ -72,6 +74,15 @@ class Renderer(object):
 
         self.dirty_base_update = True
 
+        self._number_drawer = perf_overlay_lib.DrawNumbersBuilder()
+        self._text_drawer = perf_overlay_lib.DrawTextBuilder()
+
+        self._last_update_disp_time = 0
+        self._last_draw_time = 0
+        self._delta_history = [0] * 256
+        self._text_size = 8
+        self._frame_counter = 0
+        self._draw_delta_time_history = 0
 
     def dirty_base(self):
         self.dirty_base_update = True
@@ -297,8 +308,29 @@ class Renderer(object):
 
         glViewport(0, 0, wnd.width, wnd.height)
 
+        self._last_draw_time = time.time()
+
 
     def _draw(self, wnd):
+
+
+        now = time.time()
+        time_delta_ms = max(0.00001, (now - self._last_draw_time) * 1000)
+        self._last_draw_time = now
+        self._draw_delta_time_history = self._draw_delta_time_history * 0.9 + time_delta_ms * 0.1
+
+        self._delta_history.pop(0)
+        self._delta_history.append(time_delta_ms)
+        smoothed_time_delta_ms = sum(self._delta_history) / len(self._delta_history)
+
+        update_display = now - self._last_update_disp_time >= 0.05
+        if update_display:
+            self._last_update_disp_time = now
+            self._disp_smoothed_time_delta_ms = smoothed_time_delta_ms
+            self._disp_draw_delta_time_history = self._draw_delta_time_history
+            self._disp_time_delta_ms = time_delta_ms
+
+        self._frame_counter += 1
 
         if not hasattr(self, "COUNTER_TMP"):
             self.COUNTER_TMP = 0
@@ -443,9 +475,69 @@ class Renderer(object):
             GL_NEAREST
         )
 
+        # timing size stuff (a lotta magic numbers for the text, I assume the baseline has something to do)
+        # timing_size_pixels_h = 10
+        timing_size_pixels_h = self._text_size
+        timing_size_pixels_w = 6 * timing_size_pixels_h
 
-        wnd.redraw()
-        
+        timing_size_screen_w = timing_size_pixels_w / wnd.width
+        timing_size_screen_h = timing_size_pixels_h / wnd.height
+
+        # text_size_screen_w = 5 * (timing_size_pixels_h * 1.5) * (5 / 9) / wnd.width
+        text_size_screen_w = 5 * (timing_size_pixels_h * 1.25) * (5 / 9) / wnd.width
+
+        timing_x = 5 / wnd.width - 0.5 / wnd.width
+        timing_y = 1 - (2 * timing_size_screen_h)
+
+        good_col = (0, 1, 0, 1)
+        warning_col = (1, 1, 0, 1)
+        bad_col = (1, 0, 0, 1)
+
+        def pick_ms_col(value):
+            if value > 1000/30:
+                return bad_col
+            if value > 1000/60:
+                return warning_col
+            return good_col
+
+        time_delta_col = pick_ms_col(self._disp_time_delta_ms)
+        smoothed_time_col = pick_ms_col(self._disp_smoothed_time_delta_ms)
+        delta_time_history_col = pick_ms_col(self._disp_draw_delta_time_history)
+
+        for text, number, fgcol in (
+                ("FPS: ", 1000/self._disp_time_delta_ms, time_delta_col),
+                ("MS : ", self._disp_time_delta_ms, time_delta_col),
+                ("FPS: ", 1000/self._disp_smoothed_time_delta_ms, smoothed_time_col),
+                ("MS : ", self._disp_smoothed_time_delta_ms, smoothed_time_col),
+                ("FPS: ", 1000/self._disp_draw_delta_time_history, delta_time_history_col),
+                ("MS : ", self._disp_draw_delta_time_history, delta_time_history_col),
+                ("Frm: ", self._frame_counter, (1, 1, 1, 1))
+        ):
+            self._text_drawer.add(
+                text,
+                (
+                    # timing_x, timing_y - timing_size_screen_h * 0.25,
+                    # timing_x + text_size_screen_w, timing_y + timing_size_screen_h * 1.25
+                    timing_x, timing_y - timing_size_screen_h * 0.125,
+                    timing_x + text_size_screen_w, timing_y + timing_size_screen_h * 1.125
+                ),
+                (0, 0, 0, 0),
+                # (1, 1, 1, 1)
+                fgcol
+            )
+            self._number_drawer.add(
+                number,
+                (timing_x + text_size_screen_w, timing_y, timing_x + text_size_screen_w + timing_size_screen_w, timing_y + timing_size_screen_h),
+                (0, 0, 0, 0),
+                # (1, 1, 1, 1)
+                fgcol
+            )
+            timing_y -= timing_size_screen_h * 1.5
+
+        self._number_drawer.flush()
+        self._text_drawer.flush()
+
+        wnd.redraw()        
 
     def _resize(self, wnd, width, height):
         self._prepass_framebuffer.resize(width, height)
@@ -476,6 +568,11 @@ class Renderer(object):
             self.camera.move_local(numpy.array([0, move_amount, 0]))
         elif key == b'e':
             self.camera.move_local(numpy.array([0, -move_amount, 0]))
+
+        elif key == b'.':
+            self._text_size += 0.5
+        elif key == b',':
+            self._text_size -= 0.5
 
         # Wireframe / Solid etc
         elif key == b'1':

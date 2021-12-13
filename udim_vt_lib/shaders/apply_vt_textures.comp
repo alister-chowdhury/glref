@@ -6,7 +6,7 @@ layout(local_size_x=8, local_size_y=8) in;
 
 
 #define SHOW_MISSING_TILES 1
-#define VISUALIZE_DESIRED_TILE 0
+#define VISUALIZE_DESIRED_TILE 1
 
 
 writeonly layout(binding=0)             uniform image2D     sceneCol;

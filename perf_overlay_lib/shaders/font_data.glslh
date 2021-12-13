@@ -1,0 +1,77 @@
+#ifndef TEXT_DATA_GLSL_H
+#define TEXT_DATA_GLSL_H
+
+
+#ifndef TEXT_DATA_DEFAULT_ASCII
+#define TEXT_DATA_DEFAULT_ASCII 0
+#endif
+
+
+struct FontDataHeader
+{
+    uvec4   info;   // .xy = character dimensions,
+                    // .z  = bits per character
+                    // .w  = number of u32s per plane
+    
+    uint    planePageIds[64];   // u8s packed into u32s which contains
+                                // the index that the planes data is stored at
+};
+
+
+uint getBitOffset(uint c, vec2 uv, FontDataHeader header, bool isAscii)
+{
+    uint planeOffset;
+
+    if(isAscii || (c < 0x100))
+    {
+        planeOffset = 0;
+    }
+    else
+    {
+        uint plane = c >> 8;
+        c &= 0xff;
+        uint planeIndex = (plane / 2);
+        uint planeShift = (plane % 4) * 8;
+        uint pageId = (header.planePageIds[planeIndex] >> planeShift) & 0xff;
+        planeOffset = header.info.w * pageId;
+    }
+
+    uint result = planeOffset * 32 + header.info.z * c;
+
+    uv *= vec2(header.info.xy);
+    uvec2 coord = uvec2(uv);
+
+    return result + coord.y * header.info.x + coord.x;
+}
+
+
+uint getBitOffset(uint c, vec2 uv, FontDataHeader header, uint isAscii)
+{
+    return getBitOffset(c, uv, header, bool(isAscii));
+}
+
+
+uint getBitOffset(uint c, vec2 uv, FontDataHeader header)
+{
+    return getBitOffset(c, uv, header, TEXT_DATA_DEFAULT_ASCII);
+}
+
+
+// Can't make this a function as glsl doesn't allow StructuredBuffers'
+// (uint[]), to be an argument.
+#define sampleTextDataBitOffset(bitOffset, planeData)\
+    ((planeData[bitOffset / 32] >> (bitOffset & 31)) & 1)
+
+#define sampleTextData(c, uv, header, planeData)\
+    sampleTextDataBitOffset(getBitOffset(c, uv, header), planeData)
+
+#define sampleTextDataAscii(c, uv, header, planeData)\
+    sampleTextDataBitOffset(getBitOffset(c, uv, header, true), planeData)
+
+#define sampleTextDataUnicode(c, uv, header, planeData)\
+    sampleTextDataBitOffset(getBitOffset(c, uv, header, false), planeData)
+
+
+
+
+#endif
