@@ -1,0 +1,31 @@
+#version 460 core
+
+
+layout(local_size_x=256) in;
+
+
+#include "../number_encoding.glslh"
+#include "timer_samples256.glslh"
+
+
+layout(location = 0)  uniform float initialValue = 0;
+
+
+writeonly layout(std430, binding = 0) buffer data_
+{
+    TimerSamples256 sampleData;
+};
+
+
+void main()
+{
+    sampleData.samples[gl_LocalInvocationIndex] = initialValue;
+
+    if(gl_LocalInvocationIndex == 0)
+    {
+        sampleData.data.x = 0;
+        sampleData.data.y = floatBitsToUint(initialValue);
+        sampleData.data.z = floatBitsToUint(initialValue);
+        sampleData.data.w = encodeNumber(initialValue);
+    }
+}

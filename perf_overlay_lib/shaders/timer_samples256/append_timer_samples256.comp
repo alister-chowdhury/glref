@@ -1,0 +1,63 @@
+#version 460 core
+
+
+#ifndef UPDATE_DISPLAY
+#define UPDATE_DISPLAY 0
+#endif
+
+#ifndef CONVERT_DISPAY_TEXT_TO_FPS
+#define CONVERT_DISPAY_TEXT_TO_FPS 1
+#endif
+
+
+layout(local_size_x=1) in;
+
+#include "timer_samples256.glslh"
+
+#if UPDATE_DISPLAY
+#include "../number_encoding.glslh"
+#endif
+
+
+layout(location = 0)  uniform float newSample;
+
+
+layout(std430, binding = 0) buffer data_
+{
+    TimerSamples256 sampleData;
+};
+
+
+void main()
+{
+    if(isnan(newSample) || isinf(newSample))
+    {
+        return;
+    }
+
+    uint counter = getCounter(sampleData) + 1;
+    float history = mix(getHistory(sampleData), newSample, 0.1);
+
+    // Unlikely, but possible
+    if(isnan(history) || isinf(history)) { history = newSample; }
+
+    sampleData.data.x = counter;
+    sampleData.data.y = floatBitsToUint(history);
+    sampleData.samples[counter & 255] = newSample;
+
+#if UPDATE_DISPLAY
+
+    sampleData.data.z = floatBitsToUint(history);
+    sampleData.data.w = encodeNumber(
+
+#if CONVERT_DISPAY_TEXT_TO_FPS
+        1000.0 / max(history, 0.00001)
+#else
+        history
+#endif
+
+);
+
+#endif
+
+}

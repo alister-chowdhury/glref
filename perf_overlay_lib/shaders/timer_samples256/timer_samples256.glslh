@@ -1,0 +1,66 @@
+
+#ifndef TIMER_SAMPLES256_GLSL_H
+#define TIMER_SAMPLES256_GLSL_H
+
+
+struct TimerSamples256
+{
+    // .x = counter
+    // .y = history
+    // .z = display history value
+    // .w = display history (encoded text)
+    uvec4   data;
+    float   samples[256];
+};
+
+
+
+uint  getCounter(TimerSamples256 sampleData)             { return sampleData.data.x; }
+float getHistory(TimerSamples256 sampleData)             { return uintBitsToFloat(sampleData.data.y); }
+float getDisplayHistory(TimerSamples256 sampleData)      { return uintBitsToFloat(sampleData.data.z); }
+uint  getHistoryText(TimerSamples256 sampleData)         { return sampleData.data.w; }
+
+
+float timerFetch(TimerSamples256 sampleData, uint index)
+{
+    return sampleData.samples[(index + getCounter(sampleData)) & 255];
+}
+
+float timerSample(TimerSamples256 sampleData, float u)
+{
+    u *= 256.0;
+    u += 0.5;
+    uint coord = uint(u);
+    return mix(
+        timerFetch(sampleData, coord),
+        timerFetch(sampleData, coord + 1),
+        fract(u)
+    );
+}
+
+
+struct DrawTimerSamples256Input
+{
+    // .xy = min / max value to display
+    // .zw = warning / bad ranges
+    vec4    valueRanges;
+
+    // Where to draw the graph
+    vec4    graphScreenBounds;
+
+    // Where to draw various numbers
+    vec4    historyBounds;
+};
+
+vec4 getSteppedValueColour(float value, DrawTimerSamples256Input drawInput)
+{
+
+    return vec4(
+        step(drawInput.valueRanges.z, value),
+        step(value, drawInput.valueRanges.w),
+        0,
+        1
+    );
+}
+
+#endif
