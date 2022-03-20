@@ -5,7 +5,7 @@ import time
 import numpy
 from OpenGL.GL import *
 
-from viewport import make_permutation_program
+from viewport import make_permutation_program, get_dummy_vao
 
 
 _DEBUGGING = False
@@ -52,7 +52,6 @@ class TimerSamples256Overlay(object):
     def __init__(self):
         self._timer256_ssbo = None
         self._draw256_ssbo = None
-        self._dummy_vao = None
         self._enabled = True
         self._last_time = 0
         self._last_display_update = 0
@@ -105,10 +104,6 @@ class TimerSamples256Overlay(object):
                 None,
                 GL_DYNAMIC_STORAGE_BIT
             )
-
-            vao_ptr = ctypes.c_int()
-            glCreateVertexArrays(1, vao_ptr)
-            self._dummy_vao = vao_ptr.value
 
         # Need to update stuff
         if update_draw_info:
@@ -195,7 +190,7 @@ class TimerSamples256Overlay(object):
         glEnable(GL_BLEND)
         glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA)
 
-        glBindVertexArray(self._dummy_vao)
+        glBindVertexArray(get_dummy_vao())
         glUseProgram(_DRAW_GRAPH.one())
         glBindBufferRange(GL_SHADER_STORAGE_BUFFER, 0, self._timer256_ssbo, 0, _SIZEOF_TIMER_SAMPLES_256)
         glBindBufferRange(GL_UNIFORM_BUFFER, 1, self._draw256_ssbo, 0, _SIZEOF_DRAW_INPUT_256)

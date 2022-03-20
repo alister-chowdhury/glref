@@ -24,7 +24,7 @@ layout(location = 1) in vec2 uv;
 layout(location = 0) out vec2 outUv;
 
 void main() {
-    outUv = uv * 2;
+    outUv = uv;
     gl_Position = modelViewProjection * vec4(P, 1.0);
 }
 """
@@ -303,7 +303,7 @@ class Renderer(object):
     def _draw(self, wnd):
 
         # Turn this on to make things slow
-        if False:
+        if True:
             if not hasattr(self, "COUNTER_TMP"):
                 self.COUNTER_TMP = 0
             if not hasattr(self, "UNIQUE_TMP"):

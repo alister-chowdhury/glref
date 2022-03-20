@@ -4,7 +4,7 @@ import struct
 import numpy
 from OpenGL.GL import *
 
-from viewport import load_shader_source, generate_shader_program
+from viewport import load_shader_source, generate_shader_program, get_dummy_vao
 
 _FONT_DAT_PATH = os.path.abspath(
     os.path.join(
@@ -53,7 +53,6 @@ class DrawTextBuilder(object):
     def __init__(self):
         self._ubo = None
         self._ubo_capacity = 0
-        self._dummy_vao = None
         self._font_data_size = 0
         self._font_ubo = None
         self._ascii_queue = []
@@ -66,10 +65,6 @@ class DrawTextBuilder(object):
         if self._font_ubo is not None:
             ubo_ptr = self._font_ubo
             glDeleteBuffers(1, ubo_ptr)
-        if self._dummy_vao is not None:
-            vao_ptr = ctypes.c_int()
-            vao_ptr.value = self._dummy_vao
-            glDeleteVertexArrays(1, vao_ptr)
 
     @staticmethod
     def _collapse_queue(queue):
@@ -159,11 +154,6 @@ class DrawTextBuilder(object):
         # Upload the queued things to draw to the GPU
         # Reallocate buffer if needed
         if data:
-            if self._dummy_vao is None:
-                vao_ptr = ctypes.c_int()
-                glCreateVertexArrays(1, vao_ptr)
-                self._dummy_vao = vao_ptr.value
-
             if len(data) > self._ubo_capacity:
                 ubo_ptr = ctypes.c_int()
                 if self._ubo is not None:
@@ -211,7 +201,7 @@ class DrawTextBuilder(object):
                 )
                 glBindBufferRange(GL_SHADER_STORAGE_BUFFER, 0, self._font_ubo, 0, self._font_data_size)
                 glBindBufferRange(GL_SHADER_STORAGE_BUFFER, 1, self._ubo, 0, ascii_size)
-                glBindVertexArray(self._dummy_vao)
+                glBindVertexArray(get_dummy_vao())
                 glDrawArrays(GL_TRIANGLES, 0, 6 * count)
 
             if unicode_size:
@@ -223,7 +213,7 @@ class DrawTextBuilder(object):
                 )
                 glBindBufferRange(GL_SHADER_STORAGE_BUFFER, 0, self._font_ubo, 0, self._font_data_size)
                 glBindBufferRange(GL_SHADER_STORAGE_BUFFER, 1, self._ubo, ascii_size, unicode_size)
-                glBindVertexArray(self._dummy_vao)
+                glBindVertexArray(get_dummy_vao())
                 glDrawArrays(GL_TRIANGLES, 0, 6 * count)
 
             glDisable(GL_BLEND)

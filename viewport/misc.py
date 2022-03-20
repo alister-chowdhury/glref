@@ -1,4 +1,9 @@
 import numpy
+from OpenGL.GL import *
+
+
+_DUMMY_VAO = None
+
 
 # Householder transformation
 def make_reflection_matrix(p0, p1, p2):
@@ -11,3 +16,12 @@ def make_reflection_matrix(p0, p1, p2):
         (-2*N[2]*N[0],  -2*N[2]*N[1],  1-2*N[2]*N[2], -2*N[2]*d),
         (0, 0, 0, 1)
     ), dtype=numpy.float32)
+
+
+def get_dummy_vao():
+    global _DUMMY_VAO
+    if _DUMMY_VAO is None:
+        vao_ptr = ctypes.c_int()
+        glCreateVertexArrays(1, vao_ptr)
+        _DUMMY_VAO = vao_ptr.value
+    return _DUMMY_VAO

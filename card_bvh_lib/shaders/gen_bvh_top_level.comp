@@ -1,0 +1,165 @@
+#version 460
+
+#define USING_LOAD_CARD_DATA    1
+#define CARD_DATA_BINDING       2
+
+
+#include "card_common.glsl"
+
+
+layout(location = 0) uniform uint numCards;
+layout(rgba32f, binding=0) uniform image1D cardOrigins;
+layout(rgba32f, binding=1) uniform image1D cardBBoxs;
+
+
+#define MIN_WAVE_SIZE 32
+
+
+#extension GL_KHR_shader_subgroup_basic : require
+#extension GL_KHR_shader_subgroup_arithmetic : require
+
+
+shared uint originAllocators;
+shared vec3 sharedDataMin[2 * (1024 + MIN_WAVE_SIZE-1) / MIN_WAVE_SIZE];
+shared vec3 sharedDataMax[2 * (1024 + MIN_WAVE_SIZE-1) / MIN_WAVE_SIZE];
+shared vec4 subdividePlane;
+
+shared uint countA;
+shared uint countB;
+
+layout(local_size_x=1024) in;
+
+
+void main()
+{
+    uint idx = gl_GlobalInvocationID.x;
+
+    if(idx == 0)
+    {
+        countA = 0;
+        countB = 0;
+        originAllocators = 0;
+    }
+
+    // First determine the min max extent
+    vec3 minOrigin = vec3(1e+35, 1e+35, 1e+35);
+    vec3 maxOrigin = vec3(-1e+35, -1e+35, -1e+35);
+
+
+    uint iter = idx;
+    for(iter ; iter < numCards ; iter += 1024)
+    {
+        vec3 origin = imageLoad(cardOrigins, int(iter)).xyz;
+        minOrigin = min(minOrigin, origin);
+        maxOrigin = max(maxOrigin, origin);
+    }
+
+    minOrigin = subgroupMin(minOrigin);
+    maxOrigin = subgroupMax(maxOrigin);
+
+    memoryBarrierShared(); // for originAllocators
+    uint originId;
+    if(subgroupElect())
+    {
+        originId = atomicAdd(originAllocators, 1);
+        sharedDataMin[originId] = minOrigin;
+        sharedDataMax[originId] = maxOrigin;
+    }
+
+    memoryBarrierShared();
+
+    // Estabilish what axis we're going to split on
+    if(idx)
+    {
+        minOrigin = sharedDataMin[0];
+        maxOrigin = sharedDataMax[0];
+
+        uint numWaves = originAllocators;
+        for(uint i=1; i<numWaves; ++i)
+        {
+            minOrigin = min(minOrigin, sharedDataMin[i]);
+            maxOrigin = max(maxOrigin, sharedDataMax[i]);
+        }
+
+        vec3 diff = maxOrigin - minOrigin;
+
+        vec3 planeDir;
+
+        if(diff.x > diff.y)
+        {
+            if(diff.x > diff.z)
+            {
+                planeDir = vec3(1, 0, 0);
+            }
+            else
+            {
+                planeDir = vec3(0, 0, 1);
+            }
+        }
+        else
+        {
+            if(diff.y > diff.z)
+            {
+                planeDir = vec3(0, 1, 0);
+            }
+            else
+            {
+                planeDir = vec3(0, 0, 1);
+            }
+        }
+        subdividePlane = vec4(planeDir, dot(planeDir, (minOrigin + maxOrigin) * 0.5);
+    }
+
+    memoryBarrierShared();
+
+    // Count how many are on each side and calc the bboxes
+    vec3 bboxAMin = vec3(1e+35, 1e+35, 1e+35);
+    vec3 bboxAMax = vec3(-1e+35, -1e+35, -1e+35);
+    vec3 bboxBMin = vec3(1e+35, 1e+35, 1e+35);
+    vec3 bboxBMax = vec3(-1e+35, -1e+35, -1e+35);
+
+    uint localCountA = 0;
+    uint localCountB = 0;
+    vec4 planeLocal = subdividePlane;
+
+    iter = idx;
+    for(iter ; iter < numCards ; iter += 1024)
+    {
+        vec3 bboxMin = imageLoad(cardBBoxs, int(iter << 1)).xyz;
+        vec3 bboxMax = imageLoad(cardBBoxs, int(iter << 1) + 1).xyz;
+        vec3 origin = (bboxMin + bboxMax) * 0.5;
+
+        if(dot(planeLocal, vec4(origin, -1)) < 0)
+        {
+            ++localCountA;
+            bboxAMin = min(bboxMin, bboxAMin);
+            bboxAMax = max(bboxMin, bboxAMax);
+        }
+        else
+        {
+            ++localCountB;
+            bboxBMin = min(bboxMin, bboxBMin);
+            bboxBMax = max(bboxMin, bboxBMax);            
+        }
+    }
+
+    uint localAWriteOffset = atomicAdd(countA, localCountA);
+    uint localBWriteOffset = atomicAdd(countB, localCountB);
+
+    bboxAMin = subgroupMin(bboxAMin);
+    bboxAMax = subgroupMax(bboxAMax);
+    bboxBMin = subgroupMin(bboxBMin);
+    bboxBMax = subgroupMax(bboxBMax);
+
+    if(subgroupElect())
+    {
+        sharedDataMin[2 * originId + 0] = bboxAMin;
+        sharedDataMin[2 * originId + 1] = bboxBMin;
+        sharedDataMax[2 * originId + 0] = bboxAMax;
+        sharedDataMax[2 * originId + 1] = bboxBMax;
+    }
+
+
+    memoryBarrierShared();
+
+}

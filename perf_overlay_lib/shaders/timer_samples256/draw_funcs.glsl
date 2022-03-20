@@ -13,7 +13,7 @@ readonly layout(std430, binding = 0) buffer sampleData_
 };
 
 
-layout(binding =1) uniform inputData_
+layout(binding = 1) uniform inputData_
 {
     DrawTimerSamples256Input inputData;
 };

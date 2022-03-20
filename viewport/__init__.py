@@ -27,7 +27,7 @@ from . shader_loader import (
 
 from . window import Window
 
-from . misc import make_reflection_matrix
+from . misc import make_reflection_matrix, get_dummy_vao
 
 from . prototypes import (
 
