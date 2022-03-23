@@ -120,9 +120,11 @@ class CardBuffer(object):
         self.bind(0)
         glDrawArrays(GL_TRIANGLES, 0, 6 * self.num_cards)
 
-    def debug_compact_bbox(self, compact_bbox, view_projection):
+    def debug_compact_bbox(self, compact_bbox, view_projection, num_cards=0):
+        if not num_cards:
+            num_cards = self.num_cards
         glBindVertexArray(get_dummy_vao())
         glUseProgram(_DEBUG_DRAW_COMPACT_BBOX.one())
         glUniformMatrix4fv(0, 1, GL_FALSE, view_projection.flatten())
         glBindImageTexture(0, compact_bbox, 0, 0, 0, GL_READ_ONLY, GL_RGBA32F)
-        glDrawArrays(GL_LINES, 0, 24 * self.num_cards)
+        glDrawArrays(GL_LINES, 0, 24 * num_cards)

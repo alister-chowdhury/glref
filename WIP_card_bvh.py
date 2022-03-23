@@ -117,15 +117,49 @@ class Renderer(object):
         self._card_origins = new_origin
         self._card_bboxs = new_bboxs
 
-        # Does this work??!!
-        # Be impressive if it does first try
-        # Very very slow thou (atleast on python)
-        bvh = card_bvh_lib.generate_bvh_python(
-            self._cards
-        )
 
-        self._cards.debug_draw(self.camera.view_projection)
-        self._cards.debug_compact_bbox(self._card_bboxs, self.camera.view_projection)
+        if False:
+            # Does this work??!!
+            # Be impressive if it does first try
+            # Very very slow thou (atleast on python)
+            bvh, debug_bboxes = card_bvh_lib.generate_bvh_python(
+                self._cards
+            )
+
+
+            debug_bbox_texture = ctypes.c_int()
+            glCreateTextures(GL_TEXTURE_1D, 1, debug_bbox_texture)
+
+            glTextureParameteri(debug_bbox_texture.value, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE)
+            glTextureParameteri(debug_bbox_texture.value, GL_TEXTURE_MIN_FILTER, GL_NEAREST)
+            glTextureParameteri(debug_bbox_texture.value, GL_TEXTURE_MAG_FILTER, GL_NEAREST)    
+
+            num_debug = len(debug_bboxes) // 8
+            dim = num_debug * 2
+            glTextureStorage1D(debug_bbox_texture.value, 1, GL_RGBA32F, dim)
+
+
+            glTextureSubImage1D(
+                debug_bbox_texture.value,
+                0,
+                0,
+                dim,
+                GL_RGBA,
+                GL_FLOAT,
+                numpy.array(debug_bboxes, dtype=numpy.float32)
+            )
+
+
+            self._cards.debug_compact_bbox(debug_bbox_texture.value, 
+                self.camera.view_projection,
+                num_debug
+            )
+
+            glDeleteTextures(1, debug_bbox_texture)
+        else:
+            self._cards.debug_draw(self.camera.view_projection)
+            self._cards.debug_compact_bbox(self._card_bboxs, self.camera.view_projection)
+
         self.timer_overlay.update(wnd.width, wnd.height)
 
         wnd.redraw()        

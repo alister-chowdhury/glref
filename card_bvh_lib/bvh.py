@@ -74,7 +74,7 @@ class PythonBVHCard(object):
         self.center = (self.bbox_min + self.bbox_max) * 0.5
 
 
-def generate_bvh_python_subdivde(cards, index, allocator, data_stream):
+def generate_bvh_python_subdivde(cards, index, allocator, data_stream, debug_bboxes):
     centers = [card.center for card in cards]
     extent_min = numpy.min(centers, axis=0)
     extent_max = numpy.max(centers, axis=0)
@@ -93,10 +93,10 @@ def generate_bvh_python_subdivde(cards, index, allocator, data_stream):
     sides = (numpy.dot(centers, split_plane) - numpy.dot(split_w, split_plane)) > 0
     
     left = cards[sides]
-    try:
+    if len(left):
         left_bbox_min = numpy.min([card.bbox_min for card in left], axis=0)
         left_bbox_max = numpy.max([card.bbox_max for card in left], axis=0)
-    except ValueError:
+    else:
         left_bbox_min = numpy.array([1e+35, 1e+35, 1e+35])
         left_bbox_max = numpy.array([-1e+35, -1e+35, -1e+35])
 
@@ -114,13 +114,13 @@ def generate_bvh_python_subdivde(cards, index, allocator, data_stream):
     else:
         allocator[0] += 4
         data_stream.extend((0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0))
-        generate_bvh_python_subdivde(left, left_index, allocator, data_stream)
+        generate_bvh_python_subdivde(left, left_index, allocator, data_stream, debug_bboxes)
     
     right = cards[~sides]
-    try:
+    if len(right):
         right_bbox_min = numpy.min([card.bbox_min for card in right], axis=0)
         right_bbox_max = numpy.max([card.bbox_max for card in right], axis=0)
-    except ValueError:
+    else:
         right_bbox_min = numpy.array([1e+35, 1e+35, 1e+35])
         right_bbox_max = numpy.array([-1e+35, -1e+35, -1e+35])
 
@@ -137,7 +137,14 @@ def generate_bvh_python_subdivde(cards, index, allocator, data_stream):
     else:
         allocator[0] += 4
         data_stream.extend((0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0))
-        generate_bvh_python_subdivde(right, right_index, allocator, data_stream)
+        generate_bvh_python_subdivde(right, right_index, allocator, data_stream, debug_bboxes)
+
+    if(all(x < y for x, y in zip(left_bbox_min, left_bbox_max))):
+        debug_bboxes.extend((left_bbox_min[0], left_bbox_min[1], left_bbox_min[2], 0))
+        debug_bboxes.extend((left_bbox_max[0], left_bbox_max[1], left_bbox_max[2], 0))
+    if(all(x < y for x, y in zip(right_bbox_min, right_bbox_max))):
+        debug_bboxes.extend((right_bbox_min[0], right_bbox_min[1], right_bbox_min[2], 0))
+        debug_bboxes.extend((right_bbox_max[0], right_bbox_max[1], right_bbox_max[2], 0))
 
     output_offset = index * 4
     V0xyz = numpy.frombuffer(numpy.array(left_bbox_min, dtype=numpy.float32), dtype=numpy.uint32)
@@ -171,8 +178,9 @@ def generate_bvh_python(card_buffer):
     ])
     allocator = [4]
     data_stream = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
-    generate_bvh_python_subdivde(card_nodes, 0, allocator, data_stream)
-    return data_stream
+    debug_bboxes = []
+    generate_bvh_python_subdivde(card_nodes, 0, allocator, data_stream, debug_bboxes)
+    return data_stream, debug_bboxes
 
 
 

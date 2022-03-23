@@ -12,6 +12,7 @@
 #define CARD_DATA_BINDING       0
 
 
+#include "common.glsl"
 #include "card_common.glsl"
 
 
@@ -24,44 +25,11 @@ layout(location = 0) uniform mat4 viewProjection;
 flat layout(location = 0) out vec3 outCol;
 
 
-vec3 hs1(float H)
-{
-    float R = abs(H * 6 - 3) - 1;
-    float G = 2 - abs(H * 6 - 2);
-    float B = 2 - abs(H * 6 - 4);
-    return clamp(vec3(R,G,B), vec3(0), vec3(1));
-}
-
-
-// https://www.reedbeta.com/blog/quick-and-easy-gpu-random-numbers-in-d3d11/
-uint wang_hash(uint seed)
-{
-    seed = (seed ^ 61) ^ (seed >> 16);
-    seed *= 9;
-    seed = seed ^ (seed >> 4);
-    seed *= 0x27d4eb2d;
-    seed = seed ^ (seed >> 15);
-    return seed;
-}
-
-
-
 void main()
 {
 
     uint cardId = gl_VertexID / 6;
-    uint vertexId = gl_VertexID % 6;
-
-    // 0, 1, 2
-    // 1, 2, 3
-    if(vertexId >= 3)
-    {
-        vertexId -= 2;
-#if !NO_FACE_CULLING
-        // 2, 1, 3
-        vertexId = 4 - ((vertexId - 1) % 3 + 1);
-#endif
-    }
+    uint vertexId = triangleToQuadId(gl_VertexID % 6, bool(NO_FACE_CULLING));
 
     vec3 P = getCardPoint(cardId, vertexId);
 
@@ -70,7 +38,7 @@ void main()
 #endif
 
     gl_Position = viewProjection * vec4(P, 1.0);
-    outCol = hs1((wang_hash(cardId) & 0xffff) / 65535.0);
+    outCol = randomHs1Col(cardId);
 }
 
 
