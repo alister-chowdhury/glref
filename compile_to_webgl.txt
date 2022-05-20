@@ -1,0 +1,3 @@
+
+glslc --target-env=opengl4.5 -O -g $INPUT -o test.spv
+spirv-cross --es --version 300 test.spv

@@ -8,6 +8,7 @@ from OpenGL.arrays.arraydatatype import ArrayDatatype
 from OpenGL.GL.EXT import texture_compression_s3tc
 
 import viewport
+import perf_overlay_lib
 
 
 _DEBUGGING = False
@@ -25,6 +26,11 @@ _DRAW_SHARED_VISION_PROGRAM = viewport.make_permutation_program(
     GL_VERTEX_SHADER=_DRAW_SHARED_VISION_PATH
 )
 
+_DRAW_LINES_PROGRAM = viewport.make_permutation_program(
+    _DEBUGGING,
+    GL_VERTEX_SHADER = os.path.join(_SHADER_DIR, "shared_vision_draw_lines.vert"),
+    GL_FRAGMENT_SHADER = os.path.join(_SHADER_DIR, "shared_vision_draw_lines.frag")
+)
 
 
 DRAW_STENCIL_VERTEX_SHADER_SOURCE = """
@@ -305,7 +311,9 @@ class Renderer(object):
         self.window.on_drag = self._drag
         self.window.on_keypress = self._keypress
 
+        self._draw_lines = False
         self._fow_debug_offset = [0, 0]
+        self.timer_overlay = perf_overlay_lib.TimerSamples256Overlay()
 
     def run(self):
         self.window.run()
@@ -634,6 +642,7 @@ class Renderer(object):
         self._fow_fb_depth = viewport.FramebufferTarget(GL_DEPTH32F_STENCIL8, True)
         self._fow_fb = viewport.Framebuffer((self._fow_fb_depth,), 512, 512)
 
+
         # Frame buffer which records the shared visibility history
         self._fow_history_fb_col = viewport.FramebufferTarget(GL_R8, True)
         self._fow_history_fb = viewport.Framebuffer(
@@ -654,11 +663,10 @@ class Renderer(object):
 
         glViewport(0, 0, wnd.width, wnd.height)
 
-
-
     def _draw(self, wnd):
 
         # FOW update
+        glViewport(0, 0, 512, 512)
         with self._fow_fb.bind():
             # Set the depth to 0 for any previously visible cells, causing
             # the depth test to fail on subsequent occlusion draws
@@ -705,6 +713,7 @@ class Renderer(object):
         # Per character shared visibility
         # Framebuffer really isnt needed here, could just draw directly the GL_BACK
         # it should use the FOW grid in some mildly intelligent way to account for previously seen areas
+        glViewport(0, 0, wnd.width, wnd.height)
         with self._shared_vis_fb.bind():
 
             # Draw occlusion
@@ -746,7 +755,7 @@ class Renderer(object):
             # Draw texture version (so we can see the FOW texture array)
             if True:
                 glUseProgram(self._draw_texture_program)
-                glBindTextureUnit(0, self._fow_image_ptr.value)
+                glBindTextureUnit(0, self._fow_history_fb_col.value)
             # Draw solid col
             else:
                 glUseProgram(self._draw_shape_program)
@@ -756,91 +765,28 @@ class Renderer(object):
             glUniform1f(0, 0)
             self.triangle_screen.draw()
 
-        # Copy to back
-        self._shared_vis_fb.blit_to_back(wnd.width, wnd.height, GL_COLOR_BUFFER_BIT, GL_NEAREST)
 
-        # Test to see fow
-        # self._fow_history_fb.blit_to_back(wnd.width, wnd.height, GL_COLOR_BUFFER_BIT, GL_NEAREST)
+            if(self._draw_lines):
+                glStencilFunc(GL_ALWAYS, 0, 0xFF)
+                glDepthMask(GL_FALSE)
+                glUseProgram(_DRAW_LINES_PROGRAM.get(NO_WORLD_TO_CLIP=1))
+                glBindVertexArray(viewport.get_dummy_vao())
+                glBindTextureUnit(0, self._line_texture)
+                glUniform3f(0, 0.0, 0.0, 0.0)
+                glDrawArrays(GL_LINES, 0, self.num_lines * 2)
+                glDepthMask(GL_TRUE)
 
-    def _draw_old(self, wnd):
-
-        players = (self.triangle_0, self.triangle_1, self.triangle_both)
-
-        # FOW update
-        with self._fow_fb.bind():
-            # Set the depth to 0 for any previously visible cells, causing
-            # the depth test to fail on subsequent occlusion draws
-            glStencilMask(0xFF)
-            glClear(GL_DEPTH_BUFFER_BIT | GL_STENCIL_BUFFER_BIT)
-
-            glUseProgram(self._draw_fow_init_program)
-            glBindTextureUnit(0, self._fow_history_fb_col.value)
-            self.triangle_screen.draw()
-
-            # Draw occlusion
-            debug_offset = True
-            if debug_offset:
-                glUseProgram(self._debugoffset_draw_stencil_program)
-                glUniform2f(1, self._fow_debug_offset[0], self._fow_debug_offset[1])
-            else:
-                glUseProgram(self._draw_stencil_program)
-            glStencilFunc(GL_ALWAYS, 1, 0xFF)
-            glStencilOp(GL_KEEP, GL_KEEP, GL_INCR)
-
-            # Increment the value by one for each draw call thats occluded
-            for i, player in enumerate(players):
-                depth = 1.0 - (i + 1) / (len(players) + 1)
-                glUniform1f(0, depth)
-                player.draw()
-
-        # FOW write back to history
-        with self._fow_history_fb.bind():
-            # Update any new pixels which arent occluded by all players
-            # and use the setting of depth=0 to filer excessive writes
-            glUseProgram(self._draw_fow_history_program)
-            glStencilFunc(GL_NOTEQUAL, len(players), 0xFF)
-            glStencilOp(GL_KEEP, GL_KEEP, GL_KEEP)
-            self.triangle_screen.draw()
-
-
-        # Per character shared visibility
-        # Framebuffer really isnt needed here, could just draw directly the GL_BACK
-        # it should use the FOW grid in some mildly intelligent way to account for previously seen areas
-        with self._shared_vis_fb.bind():
-
-            # Draw occlusion
-            glStencilMask(0xFF)
-            glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT | GL_STENCIL_BUFFER_BIT)
-            glUseProgram(self._draw_stencil_program)
-            glStencilFunc(GL_ALWAYS, 1, 0xFF)
-            glStencilOp(GL_KEEP, GL_KEEP, GL_INCR)
-            
-            # Increment the value by one for each draw call thats occluded
-            for i, player in enumerate(players):
-                depth = 1.0 - (i + 1) / (len(players) + 1)
-                glUniform1f(0, depth)
-                player.draw()
-
-
-            # Only draw things not occluded by all players
-            # Draw texture version (so we can see the FOW texture array)
-            if True:
-                glUseProgram(self._draw_texture_program)
-                glBindTextureUnit(0, self._fow_image_ptr.value)
-            # Draw solid col
-            else:
-                glUseProgram(self._draw_shape_program)
-                glUniform4f(1, 0, 1, 0, 1)
-            glStencilFunc(GL_NOTEQUAL, len(players), 0xFF)
-            glStencilOp(GL_KEEP, GL_KEEP, GL_KEEP)
-            glUniform1f(0, 0)
-            self.triangle_screen.draw()
 
         # Copy to back
         self._shared_vis_fb.blit_to_back(wnd.width, wnd.height, GL_COLOR_BUFFER_BIT, GL_NEAREST)
 
         # Test to see fow
         # self._fow_history_fb.blit_to_back(wnd.width, wnd.height, GL_COLOR_BUFFER_BIT, GL_NEAREST)
+        
+
+        self.timer_overlay.update(wnd.width, wnd.height)
+        wnd.redraw()
+
 
 
     def _resize(self, wnd, width, height):
@@ -861,6 +807,9 @@ class Renderer(object):
             self._fow_debug_offset[1] -= 0.01
         elif key == b'd':
             self._fow_debug_offset[0] += 0.01
+        
+        elif key == b'l':
+            self._draw_lines = not self._draw_lines
 
         # Wireframe / Solid etc
         elif key == b'1':

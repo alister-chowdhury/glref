@@ -246,6 +246,7 @@ void main()
 
 """
 
+LINEMAP_RESOLUTION = 512
 
 class Renderer(object):
 
@@ -302,7 +303,7 @@ class Renderer(object):
         )
         self._point_light_shadow_framebuffer = viewport.Framebuffer(
             (self._point_light_shadow_depth,),
-            512,    # resolution of 512
+            LINEMAP_RESOLUTION,    # resolution of 512
             256     # support 256 pointlights
         )
 
@@ -354,7 +355,7 @@ class Renderer(object):
     def _recalculate_point_lights_shadows(self, idx=None):
         previous_viewport = glGetIntegerv(GL_VIEWPORT)
         with self._point_light_shadow_framebuffer.bind():
-            glViewport(0, 0, 512, 256)
+            glViewport(0, 0, LINEMAP_RESOLUTION, 256)
             glUseProgram(self._draw_line_shadows_program)
 
             glUniform1f(0, 1.0 / 256.0)
@@ -375,7 +376,7 @@ class Renderer(object):
             # Recaculate just one point light
             else:
                 glEnable(GL_SCISSOR_TEST)
-                glScissor(0, idx, 512, 1);
+                glScissor(0, idx, LINEMAP_RESOLUTION, 1);
                 glClear(GL_DEPTH_BUFFER_BIT)
                 glDisable(GL_SCISSOR_TEST)
                 glUniform1ui(1, idx)

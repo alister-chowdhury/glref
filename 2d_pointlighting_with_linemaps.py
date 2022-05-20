@@ -530,7 +530,7 @@ class Renderer(object):
         );
         self._point_light_shadow_framebuffer = viewport.Framebuffer(
             (self._point_lights_linemap, self._point_light_shadow_depth,),
-            512,    # resolution of 512
+            LINEMAP_RESOLUTION,    # resolution of 512
             256     # support 256 pointlights
         )
 
@@ -560,7 +560,7 @@ class Renderer(object):
         );
         self._point_light_shadow_framebuffer_peel = viewport.Framebuffer(
             (self._point_lights_linemap_peel, self._point_light_shadow_depth_peel,),
-            512,    # resolution of 512
+            LINEMAP_RESOLUTION,    # resolution of 512
             256     # support 256 pointlights
         )
 
