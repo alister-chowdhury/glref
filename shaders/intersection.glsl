@@ -1,3 +1,13 @@
+#ifndef INTERSECTION_GLSL_H
+#define INTERSECTION_GLSL_H
+
+
+// https://www.geogebra.org/calculator/jenewbrk
+float planeOriginIntersection2D(vec2 direction, vec3 plane)
+{
+    return 1.0 / (plane.z * dot(direction, plane.xy));
+}
+
 
 // https://www.geogebra.org/calculator/ytnhzgzb
 bool lineSegmentsIntersectFromDeltas(vec2 AB, vec2 CD, vec2 AC)
@@ -88,3 +98,6 @@ float lineSegmentsIntersectBiasedCD(vec2 A, vec2 B, vec2 C, vec2 D, float bias)
     u = abs(u * 2. - 1.);
     return 1.0-smoothstep(1.-bias, 1.+bias, u);
 }
+
+
+#endif

@@ -32,6 +32,18 @@ _DRAW_LINES_PROGRAM = viewport.make_permutation_program(
     GL_FRAGMENT_SHADER = os.path.join(_SHADER_DIR, "shared_vision_draw_lines.frag")
 )
 
+_CLEAR_LINES_MAPS_PROGRAM = viewport.make_permutation_program(
+    _DEBUGGING,
+    GL_VERTEX_SHADER = os.path.join(_SHADER_DIR, "2d_linemap_plane_blocking_clear.vert"),
+    GL_FRAGMENT_SHADER = os.path.join(_SHADER_DIR, "2d_linemap_plane_blocking_clear.frag")
+)
+
+_DRAW_LINES_MAPS_PROGRAM = viewport.make_permutation_program(
+    _DEBUGGING,
+    GL_VERTEX_SHADER = os.path.join(_SHADER_DIR, "2d_linemap_plane_blocking_gen.vert"),
+    GL_FRAGMENT_SHADER = os.path.join(_SHADER_DIR, "2d_linemap_plane_blocking_gen.frag")
+)
+
 
 DRAW_STENCIL_VERTEX_SHADER_SOURCE = """
 #version 460 core
@@ -296,6 +308,7 @@ def generate_fog_of_war_texture():
 
 
 
+LINEMAP_RESOLUTION = 512
 
 
 class Renderer(object):
@@ -346,6 +359,64 @@ class Renderer(object):
             fow_bytes,
         )
         glBindTexture(GL_TEXTURE_2D_ARRAY, 0)
+
+
+        # Point texture object and depth framebuffer setup
+        point_lights = numpy.array([
+            [[-0.6957199824877, 0.7767946228292, 0.3, 1.0], [1.0, 0.0, 0.0, 0.0]],
+            [[-0.5137166033324, 0.6350419909871, 0.3, 1.0], [0.0, 1.0, 0.0, 0.0]],
+            [[-0.5959681304506, 0.2675351676927, 0.3, 1.0], [0.0, 0.0, 1.0, 0.0]],
+        ], dtype=numpy.float32)
+
+        self.num_point_lights = len(point_lights)
+
+        self._point_lights_ptr = ctypes.c_int()
+        glCreateTextures(GL_TEXTURE_2D, 1, self._point_lights_ptr)
+        self._point_lights = self._point_lights_ptr.value
+
+        glTextureParameteri(self._point_lights, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE)
+        glTextureParameteri(self._point_lights, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE)
+        glTextureParameteri(self._point_lights, GL_TEXTURE_MIN_FILTER, GL_NEAREST)
+        glTextureParameteri(self._point_lights, GL_TEXTURE_MAG_FILTER, GL_NEAREST)
+
+        glTextureStorage2D(self._point_lights, 1, GL_RGBA16F, 2, self.num_point_lights)
+        glTextureSubImage2D(
+            self._point_lights, 0, 0, 0,
+            2, self.num_point_lights,
+            GL_RGBA, GL_FLOAT,
+            point_lights
+        )
+        
+        self._point_lights_shadow_plane = viewport.FramebufferTarget(
+            GL_RGBA16F,
+            True,
+            custom_texture_settings={
+                GL_TEXTURE_WRAP_S: GL_REPEAT,
+                GL_TEXTURE_WRAP_T: GL_CLAMP_TO_EDGE,
+                GL_TEXTURE_MIN_FILTER: GL_NEAREST,
+                GL_TEXTURE_MAG_FILTER: GL_NEAREST,
+            }
+        );
+
+        self._point_light_shadow_depth = viewport.FramebufferTarget(
+            GL_DEPTH_COMPONENT32F,
+            True,
+            # PCF friendly settings
+            custom_texture_settings={
+                GL_TEXTURE_WRAP_S: GL_REPEAT,
+                GL_TEXTURE_WRAP_T: GL_CLAMP_TO_EDGE,
+                GL_TEXTURE_MIN_FILTER: GL_LINEAR,
+                GL_TEXTURE_MAG_FILTER: GL_LINEAR,
+                GL_TEXTURE_COMPARE_FUNC: GL_LEQUAL,
+                GL_TEXTURE_COMPARE_MODE: GL_COMPARE_REF_TO_TEXTURE,
+            }
+        )
+        self._point_light_shadow_fb = viewport.Framebuffer(
+            (self._point_lights_shadow_plane, self._point_light_shadow_depth,),
+            LINEMAP_RESOLUTION,
+            self.num_point_lights
+        )
+
 
 
         self.players =[
@@ -663,6 +734,8 @@ class Renderer(object):
 
         glViewport(0, 0, wnd.width, wnd.height)
 
+
+
     def _draw(self, wnd):
 
         # FOW update
@@ -708,6 +781,29 @@ class Renderer(object):
             glStencilFunc(GL_NOTEQUAL, len(self.players), 0xFF)
             glStencilOp(GL_KEEP, GL_KEEP, GL_KEEP)
             self.triangle_screen.draw()
+
+
+        # Generate light shadow maps
+        glViewport(0, 0, LINEMAP_RESOLUTION, self.num_point_lights)
+        with self._point_light_shadow_fb.bind():
+            glDepthFunc(GL_ALWAYS)
+            glUseProgram(_CLEAR_LINES_MAPS_PROGRAM.get())
+            glBindVertexArray(viewport.get_dummy_vao())
+            glDrawArrays(GL_TRIANGLES, 0, 3)
+
+            glDepthFunc(GL_LESS)
+            glUseProgram(_DRAW_LINES_MAPS_PROGRAM.get())
+            glBindTextureUnit(0, self._line_texture)
+            glBindTextureUnit(1, self._point_lights)
+            glUniform1i(0, 0)
+            glUniform1f(1, 1.0 / self.num_point_lights)
+            glBindVertexArray(viewport.get_dummy_vao())
+            glDrawArraysInstanced(
+                GL_LINES,
+                0,
+                2 * 2 * self.num_lines, # 2 * 2 * lineCount
+                self.num_point_lights   # pointLightCount
+            )
 
 
         # Per character shared visibility
