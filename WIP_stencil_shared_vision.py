@@ -44,6 +44,25 @@ _DRAW_LINES_MAPS_PROGRAM = viewport.make_permutation_program(
     GL_FRAGMENT_SHADER = os.path.join(_SHADER_DIR, "2d_linemap_plane_blocking_gen.frag")
 )
 
+_DRAW_LINES_MAPS_ONE_PASS_PROGRAM = viewport.make_permutation_program(
+    _DEBUGGING,
+    GL_VERTEX_SHADER = os.path.join(_SHADER_DIR, "2d_linemap_plane_blocking_gen_one_pass.vert"),
+    GL_FRAGMENT_SHADER = os.path.join(_SHADER_DIR, "2d_linemap_plane_blocking_gen_one_pass.frag")
+)
+
+_DRAW_LIGHTS_BBOX_PROGRAM = viewport.make_permutation_program(
+    _DEBUGGING,
+    GL_VERTEX_SHADER = os.path.join(_SHADER_DIR, "2d_linemap_plane_blocking_bbox.vert"),
+    GL_FRAGMENT_SHADER = os.path.join(_SHADER_DIR, "2d_linemap_plane_blocking_bbox.frag")
+)
+
+_DRAW_LIGHTMAP_VIS_PROGRAM = viewport.make_permutation_program(
+    _DEBUGGING,
+    GL_VERTEX_SHADER = os.path.join(_SHADER_DIR, "2d_linemap_plane_blocking_vis_surface.vert"),
+    GL_FRAGMENT_SHADER = os.path.join(_SHADER_DIR, "constant_col.frag")
+)
+
+
 
 DRAW_STENCIL_VERTEX_SHADER_SOURCE = """
 #version 460 core
@@ -325,6 +344,7 @@ class Renderer(object):
         self.window.on_keypress = self._keypress
 
         self._draw_lines = False
+        self._two_pass_lightmaps = True
         self._fow_debug_offset = [0, 0]
         self.timer_overlay = perf_overlay_lib.TimerSamples256Overlay()
 
@@ -367,6 +387,17 @@ class Renderer(object):
             [[-0.5137166033324, 0.6350419909871, 0.3, 1.0], [0.0, 1.0, 0.0, 0.0]],
             [[-0.5959681304506, 0.2675351676927, 0.3, 1.0], [0.0, 0.0, 1.0, 0.0]],
         ], dtype=numpy.float32)
+
+        # Stress test
+        if False:
+            import random
+            point_lights = numpy.array([
+                [
+                    [random.random() * 2 - 1, random.random() * 2 - 1, random.random() * 2 - 1, random.random()],
+                    [random.random(), random.random(), random.random(), random.random()]
+                ]
+                for _ in range(10000)
+            ], dtype=numpy.float32)
 
         self.num_point_lights = len(point_lights)
 
@@ -414,6 +445,17 @@ class Renderer(object):
         self._point_light_shadow_fb = viewport.Framebuffer(
             (self._point_lights_shadow_plane, self._point_light_shadow_depth,),
             LINEMAP_RESOLUTION,
+            self.num_point_lights
+        )
+
+        self._point_lights_bbox_bbox = viewport.FramebufferTarget(
+            GL_RGBA16F,
+            True,
+        );
+
+        self._point_light_bbox_fb = viewport.Framebuffer(
+            (self._point_lights_bbox_bbox,),
+            1,
             self.num_point_lights
         )
 
@@ -785,25 +827,56 @@ class Renderer(object):
 
         # Generate light shadow maps
         glViewport(0, 0, LINEMAP_RESOLUTION, self.num_point_lights)
-        with self._point_light_shadow_fb.bind():
-            glDepthFunc(GL_ALWAYS)
-            glUseProgram(_CLEAR_LINES_MAPS_PROGRAM.get())
-            glBindVertexArray(viewport.get_dummy_vao())
-            glDrawArrays(GL_TRIANGLES, 0, 3)
+        if self._two_pass_lightmaps:
+            with self._point_light_shadow_fb.bind():
+                glDepthFunc(GL_ALWAYS)
+                glUseProgram(_CLEAR_LINES_MAPS_PROGRAM.get())
+                glBindVertexArray(viewport.get_dummy_vao())
+                glDrawArrays(GL_TRIANGLES, 0, 3)
 
-            glDepthFunc(GL_LESS)
-            glUseProgram(_DRAW_LINES_MAPS_PROGRAM.get())
-            glBindTextureUnit(0, self._line_texture)
-            glBindTextureUnit(1, self._point_lights)
-            glUniform1i(0, 0)
-            glUniform1f(1, 1.0 / self.num_point_lights)
+                glDepthFunc(GL_LESS)
+                glUseProgram(_DRAW_LINES_MAPS_PROGRAM.get(APPLY_BIAS=1))
+                glBindTextureUnit(0, self._line_texture)
+                glBindTextureUnit(1, self._point_lights)
+                glUniform1i(0, 0)
+                glUniform2f(1, 1.0 / self.num_point_lights, 0.5 / LINEMAP_RESOLUTION)
+                glBindVertexArray(viewport.get_dummy_vao())
+                glDrawArraysInstanced(
+                    GL_LINES,
+                    0,
+                    2 * 2 * self.num_lines, # 2 * 2 * lineCount
+                    self.num_point_lights   # pointLightCount
+                )
+
+        # one pass version of generating light shadow maps
+        # slower sadly.
+        # On the flipside, it wouldn't require a depth buffer
+        # or a clear pass.
+        else:
+            with self._point_light_shadow_fb.bind():
+                glDepthFunc(GL_ALWAYS)
+                glDepthMask(GL_FALSE)
+                glUseProgram(_DRAW_LINES_MAPS_ONE_PASS_PROGRAM.get())
+                glBindVertexArray(viewport.get_dummy_vao())
+                glBindTextureUnit(0, self._line_texture)
+                glBindTextureUnit(1, self._point_lights)
+                glUniform2i(0, self.num_point_lights, self.num_lines)
+                glDrawArrays(GL_TRIANGLES, 0, 3)
+                glDepthMask(GL_TRUE)
+                glDepthFunc(GL_LESS)
+
+        # Generate light bboxs
+        glViewport(0, 0, 1, self.num_point_lights)
+        with self._point_light_bbox_fb.bind():
+            glUseProgram(_DRAW_LIGHTS_BBOX_PROGRAM.get())
             glBindVertexArray(viewport.get_dummy_vao())
-            glDrawArraysInstanced(
-                GL_LINES,
-                0,
-                2 * 2 * self.num_lines, # 2 * 2 * lineCount
-                self.num_point_lights   # pointLightCount
-            )
+            glBindTextureUnit(0, self._point_lights_shadow_plane.value)
+            glBindTextureUnit(1, self._point_lights)
+            glUniform4f(0, self.num_point_lights,
+                            1.0 / self.num_point_lights,
+                            self.num_lines,
+                            1.0 / self.num_lines)
+            glDrawArrays(GL_TRIANGLES, 0, 3)
 
 
         # Per character shared visibility
@@ -862,14 +935,44 @@ class Renderer(object):
             self.triangle_screen.draw()
 
 
+            # Vis point light surface
+            if True:
+                glStencilFunc(GL_ALWAYS, 0, 0xFF)
+                glDepthMask(GL_FALSE)
+                glDisable(GL_DEPTH_TEST)
+                glUseProgram(_DRAW_LIGHTMAP_VIS_PROGRAM.get(COLOUR_LOCATION=2))
+                glBindVertexArray(viewport.get_dummy_vao())
+                glBindTextureUnit(0, self._point_lights_shadow_plane.value)
+                glBindTextureUnit(1, self._point_lights)
+                glUniform1f(1, 1.0/LINEMAP_RESOLUTION)
+ 
+                glUniform1i(0, 0)
+                glUniform4f(2, 1.0, 0.0, 0.0, 1.0)
+                glDrawArrays(GL_LINES, 0, LINEMAP_RESOLUTION * 2)
+
+
+                glUniform1i(0, 1)
+                glUniform4f(2, 1.0, 1.0, 0.0, 1.0)
+                glDrawArrays(GL_LINES, 0, LINEMAP_RESOLUTION * 2)
+
+                glUniform1i(0, 2)
+                glUniform4f(2, 1.0, 1.0, 1.0, 1.0)
+                glDrawArrays(GL_LINES, 0, LINEMAP_RESOLUTION * 2)
+
+
+                glEnable(GL_DEPTH_TEST)
+                glDepthMask(GL_TRUE)
+
             if(self._draw_lines):
                 glStencilFunc(GL_ALWAYS, 0, 0xFF)
                 glDepthMask(GL_FALSE)
+                glDisable(GL_DEPTH_TEST)
                 glUseProgram(_DRAW_LINES_PROGRAM.get(NO_WORLD_TO_CLIP=1))
                 glBindVertexArray(viewport.get_dummy_vao())
                 glBindTextureUnit(0, self._line_texture)
-                glUniform3f(0, 0.0, 0.0, 0.0)
+                glUniform3f(0, 0.0, 0.0, 1.0)
                 glDrawArrays(GL_LINES, 0, self.num_lines * 2)
+                glEnable(GL_DEPTH_TEST)
                 glDepthMask(GL_TRUE)
 
 
@@ -906,6 +1009,9 @@ class Renderer(object):
         
         elif key == b'l':
             self._draw_lines = not self._draw_lines
+
+        elif key == b't':
+            self._two_pass_lightmaps = not self._two_pass_lightmaps
 
         # Wireframe / Solid etc
         elif key == b'1':

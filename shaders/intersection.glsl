@@ -5,7 +5,25 @@
 // https://www.geogebra.org/calculator/jenewbrk
 float planeOriginIntersection2D(vec2 direction, vec3 plane)
 {
-    return 1.0 / (plane.z * dot(direction, plane.xy));
+    return plane.z / dot(direction, plane.xy);
+}
+
+
+// https://iquilezles.org/articles/distfunctions2d/
+float distanceToLine(vec2 P, vec2 A, vec2 B)
+{
+    vec2 PA = P-A, BA = B-A;
+    float H = clamp(dot(PA, BA) / dot(BA, BA), 0.0, 1.0);
+    return length(PA - BA*H);
+}
+
+
+float distanceToLineSq(vec2 P, vec2 A, vec2 B)
+{
+    vec2 PA = P-A, BA = B-A;
+    float H = clamp(dot(PA, BA) / dot(BA, BA), 0.0, 1.0);
+    vec2 D0 = (PA - BA*H);
+    return dot(D0, D0);
 }
 
 

@@ -71,6 +71,7 @@ def optimize_shader_roundtrip(filepath, macros=None):
             _GLSLC_EXEC,
             "--target-env=opengl4.5",
             "-O",
+            "-g",
             filepath,
             "-o", tmp.name
         ]
