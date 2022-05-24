@@ -62,6 +62,11 @@ _DRAW_LIGHTMAP_VIS_PROGRAM = viewport.make_permutation_program(
     GL_FRAGMENT_SHADER = os.path.join(_SHADER_DIR, "constant_col.frag")
 )
 
+_DRAW_POINTLIGHTS_PROGRAM = viewport.make_permutation_program(
+    _DEBUGGING,
+    GL_VERTEX_SHADER = os.path.join(_SHADER_DIR, "shared_vision_draw_point_lights.vert"),
+    GL_FRAGMENT_SHADER = os.path.join(_SHADER_DIR, "shared_vision_draw_point_lights.frag")
+)
 
 
 DRAW_STENCIL_VERTEX_SHADER_SOURCE = """
@@ -393,8 +398,8 @@ class Renderer(object):
             import random
             point_lights = numpy.array([
                 [
-                    [random.random() * 2 - 1, random.random() * 2 - 1, random.random() * 2 - 1, random.random()],
-                    [random.random(), random.random(), random.random(), random.random()]
+                    [random.random() * 2 - 1, random.random() * 2 - 1, random.random() * 0.3, random.random()],
+                    [random.random() * 0.05, random.random() * 0.05, random.random() * 0.05, random.random()]
                 ]
                 for _ in range(10000)
             ], dtype=numpy.float32)
@@ -424,8 +429,8 @@ class Renderer(object):
             custom_texture_settings={
                 GL_TEXTURE_WRAP_S: GL_REPEAT,
                 GL_TEXTURE_WRAP_T: GL_CLAMP_TO_EDGE,
-                GL_TEXTURE_MIN_FILTER: GL_NEAREST,
-                GL_TEXTURE_MAG_FILTER: GL_NEAREST,
+                GL_TEXTURE_MIN_FILTER: GL_LINEAR,
+                GL_TEXTURE_MAG_FILTER: GL_LINEAR,
             }
         );
 
@@ -872,10 +877,7 @@ class Renderer(object):
             glBindVertexArray(viewport.get_dummy_vao())
             glBindTextureUnit(0, self._point_lights_shadow_plane.value)
             glBindTextureUnit(1, self._point_lights)
-            glUniform4f(0, self.num_point_lights,
-                            1.0 / self.num_point_lights,
-                            self.num_lines,
-                            1.0 / self.num_lines)
+            glUniform2f(0, self.num_point_lights, 1.0 / LINEMAP_RESOLUTION)
             glDrawArrays(GL_TRIANGLES, 0, 3)
 
 
@@ -935,8 +937,31 @@ class Renderer(object):
             self.triangle_screen.draw()
 
 
-            # Vis point light surface
+            # Draw pointlights
             if True:
+                # glStencilFunc(GL_ALWAYS, 0, 0xFF)
+                glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_FALSE)
+                glDepthMask(GL_FALSE)
+                glDisable(GL_DEPTH_TEST)
+                glEnable(GL_BLEND)
+                glBlendFunc(GL_ONE, GL_ONE)
+                glUseProgram(_DRAW_POINTLIGHTS_PROGRAM.get())
+                glUniform1f(0, 1.0/self.num_point_lights)
+                glBindTextureUnit(0, self._point_lights_bbox_bbox.value)
+                glBindTextureUnit(1, self._point_lights)
+                glBindTextureUnit(2, self._point_lights_shadow_plane.value)
+                glBindVertexArray(viewport.get_dummy_vao())
+                glDrawArrays(GL_TRIANGLES, 0, 6 * self.num_point_lights)
+                # glDrawArrays(GL_TRIANGLES, 0, 6 * 1)
+                glBlendFunc(GL_ONE, GL_ZERO)
+                glDisable(GL_BLEND)
+                glEnable(GL_DEPTH_TEST)
+                glDepthMask(GL_TRUE)
+                glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE)
+
+
+            # Vis point light surface
+            if False:
                 glStencilFunc(GL_ALWAYS, 0, 0xFF)
                 glDepthMask(GL_FALSE)
                 glDisable(GL_DEPTH_TEST)

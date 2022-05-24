@@ -24,4 +24,28 @@ float fastAtan2(float y, float x)
 }
 
 
+int triangleToQuadVertexIdCW(int vertexId)
+{
+    // 0---1
+    // | \ |
+    // 3---2
+    //
+    // 0 1 2 =>  0 1 2
+    // 3 4 5 =>  2 3 0
+    if(vertexId < 3) { return vertexId; }
+    return (vertexId - 1) & 3;
+}
+
+int triangleToQuadVertexIdZ(int vertexId)
+{
+    // 0---1
+    // | / |
+    // 2---3
+    //
+    // 0 1 2 =>  0 1 2
+    // 3 4 5 =>  1 2 3
+    if(vertexId < 3) { return vertexId; }
+    return vertexId - 2;
+}
+
 #endif
