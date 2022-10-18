@@ -4,9 +4,8 @@
 #include "intersection.glsl"
 
 
-layout(binding=0) uniform sampler2D lightBboxs;
-layout(binding=1) uniform sampler2D lights;
-layout(binding=2) uniform sampler2D lightMap;
+layout(binding=0) uniform sampler2D lights;
+layout(binding=1) uniform sampler2D lightMap;
 
 layout(location=0)  uniform float inverseTextureSize;
 

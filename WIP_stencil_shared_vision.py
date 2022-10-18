@@ -62,10 +62,16 @@ _DRAW_LIGHTMAP_VIS_PROGRAM = viewport.make_permutation_program(
     GL_FRAGMENT_SHADER = os.path.join(_SHADER_DIR, "constant_col.frag")
 )
 
-_DRAW_POINTLIGHTS_PROGRAM = viewport.make_permutation_program(
+_DRAW_BAKED_POINTLIGHTS_PROGRAM = viewport.make_permutation_program(
     _DEBUGGING,
-    GL_VERTEX_SHADER = os.path.join(_SHADER_DIR, "shared_vision_draw_point_lights.vert"),
-    GL_FRAGMENT_SHADER = os.path.join(_SHADER_DIR, "shared_vision_draw_point_lights.frag")
+    GL_VERTEX_SHADER = os.path.join(_SHADER_DIR, "draw_full_screen.vert"),
+    GL_FRAGMENT_SHADER = os.path.join(_SHADER_DIR, "shared_vision_draw_baked_point_lights.frag")
+)
+
+_BAKE_POINTLIGHTS_PROGRAM = viewport.make_permutation_program(
+    _DEBUGGING,
+    GL_VERTEX_SHADER = os.path.join(_SHADER_DIR, "shared_vision_bake_point_lights.vert"),
+    GL_FRAGMENT_SHADER = os.path.join(_SHADER_DIR, "shared_vision_bake_point_lights.frag")
 )
 
 
@@ -333,6 +339,8 @@ def generate_fog_of_war_texture():
 
 
 LINEMAP_RESOLUTION = 512
+FOG_OF_WAR_RESOLUTION = 512
+BAKED_LIGHTING_RESOLUTION = 1024
 
 
 class Renderer(object):
@@ -352,6 +360,9 @@ class Renderer(object):
         self._two_pass_lightmaps = True
         self._fow_debug_offset = [0, 0]
         self.timer_overlay = perf_overlay_lib.TimerSamples256Overlay()
+
+        self._line_maps_baked = False
+        self._lights_baked = False
 
     def run(self):
         self.window.run()
@@ -452,19 +463,6 @@ class Renderer(object):
             LINEMAP_RESOLUTION,
             self.num_point_lights
         )
-
-        self._point_lights_bbox_bbox = viewport.FramebufferTarget(
-            GL_RGBA16F,
-            True,
-        );
-
-        self._point_light_bbox_fb = viewport.Framebuffer(
-            (self._point_lights_bbox_bbox,),
-            1,
-            self.num_point_lights
-        )
-
-
 
         self.players =[
             [-0.704384548584,0.8338315304911],
@@ -758,7 +756,11 @@ class Renderer(object):
         # Frame buffer which records the shared visibility on an entire grid per update
         # depth24_s8 on mobile
         self._fow_fb_depth = viewport.FramebufferTarget(GL_DEPTH32F_STENCIL8, True)
-        self._fow_fb = viewport.Framebuffer((self._fow_fb_depth,), 512, 512)
+        self._fow_fb = viewport.Framebuffer(
+            (self._fow_fb_depth,),
+            FOG_OF_WAR_RESOLUTION,
+            FOG_OF_WAR_RESOLUTION
+        )
 
 
         # Frame buffer which records the shared visibility history
@@ -768,8 +770,8 @@ class Renderer(object):
                 viewport.ProxyFramebufferTarget(self._fow_fb_depth),
                 self._fow_history_fb_col
             ),
-            512,
-            512
+            FOG_OF_WAR_RESOLUTION,
+            FOG_OF_WAR_RESOLUTION
         )
 
         # Clear the initial history, although this should probably be uploaded
@@ -777,10 +779,90 @@ class Renderer(object):
         with self._fow_history_fb.bind():
             glClear(GL_COLOR_BUFFER_BIT)
 
+
+        # Framebuffer for baked direct lighting
+        self._baked_lighting_col = viewport.FramebufferTarget(
+            GL_RGB10_A2,
+            # GL_RGBA16F,
+            True,
+            custom_texture_settings={
+                GL_TEXTURE_WRAP_S: GL_CLAMP_TO_EDGE,
+                GL_TEXTURE_WRAP_T: GL_CLAMP_TO_EDGE,
+                GL_TEXTURE_MIN_FILTER: GL_LINEAR,
+                GL_TEXTURE_MAG_FILTER: GL_LINEAR,
+            })
+        self._baked_lighting_fb = viewport.Framebuffer(
+            (self._baked_lighting_col,),
+            BAKED_LIGHTING_RESOLUTION,
+            BAKED_LIGHTING_RESOLUTION
+        )
+
+
         glClearColor(0.5, 0.5, 0.5, 0.0)
 
         glViewport(0, 0, wnd.width, wnd.height)
 
+
+    def _generate_line_maps(self):
+        glViewport(0, 0, LINEMAP_RESOLUTION, self.num_point_lights)
+        with self._point_light_shadow_fb.bind():
+            glDepthFunc(GL_ALWAYS)
+            glUseProgram(_CLEAR_LINES_MAPS_PROGRAM.get())
+            glBindVertexArray(viewport.get_dummy_vao())
+            glDrawArrays(GL_TRIANGLES, 0, 3)
+
+            glDepthFunc(GL_LESS)
+            glUseProgram(_DRAW_LINES_MAPS_PROGRAM.get(APPLY_BIAS=1))
+            glBindTextureUnit(0, self._line_texture)
+            glBindTextureUnit(1, self._point_lights)
+            glUniform1i(0, 0)
+            glUniform2f(1, 1.0 / self.num_point_lights, 0.5 / LINEMAP_RESOLUTION)
+            glBindVertexArray(viewport.get_dummy_vao())
+            glDrawArraysInstanced(
+                GL_LINES,
+                0,
+                2 * 2 * self.num_lines, # 2 * 2 * lineCount
+                self.num_point_lights   # pointLightCount
+            )
+
+    def _bake_lights(self, region=None):
+        # Render lights into a single texture
+        glViewport(0, 0, BAKED_LIGHTING_RESOLUTION, BAKED_LIGHTING_RESOLUTION)
+        glClearColor(0.0, 0.0, 0.0, 0.0)
+        if region:
+            glEnable(GL_SCISSOR_TEST)
+            glScissor(region[0], region[1], region[2], region[3])
+        with self._baked_lighting_fb.bind():
+            glClear(GL_COLOR_BUFFER_BIT)
+            glEnable(GL_BLEND)
+            glBlendFunc(GL_ONE, GL_ONE)
+            glUseProgram(_BAKE_POINTLIGHTS_PROGRAM.get())
+            glUniform1f(0, 1.0/self.num_point_lights)
+            glBindTextureUnit(0, self._point_lights)
+            glBindTextureUnit(1, self._point_lights_shadow_plane.value)
+            glBindVertexArray(viewport.get_dummy_vao())
+            glDrawArrays(GL_TRIANGLES, 0, 6 * self.num_point_lights)
+            glBlendFunc(GL_ONE, GL_ZERO)
+            glDisable(GL_BLEND)
+        if region:
+            glDisable(GL_SCISSOR_TEST)
+
+    def _apply_lighting(self):
+        # glStencilFunc(GL_ALWAYS, 0, 0xFF)
+        glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_FALSE)
+        glDepthMask(GL_FALSE)
+        glDisable(GL_DEPTH_TEST)
+        glEnable(GL_BLEND)
+        glBlendFunc(GL_ONE, GL_ONE)
+        glUseProgram(_DRAW_BAKED_POINTLIGHTS_PROGRAM.get(VS_OUTPUT_UV=0))
+        glBindTextureUnit(0, self._baked_lighting_col.value)
+        glBindVertexArray(viewport.get_dummy_vao())
+        glDrawArrays(GL_TRIANGLES, 0, 3)
+        glBlendFunc(GL_ONE, GL_ZERO)
+        glDisable(GL_BLEND)
+        glEnable(GL_DEPTH_TEST)
+        glDepthMask(GL_TRUE)
+        glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE)
 
 
     def _draw(self, wnd):
@@ -831,60 +913,20 @@ class Renderer(object):
 
 
         # Generate light shadow maps
-        glViewport(0, 0, LINEMAP_RESOLUTION, self.num_point_lights)
-        if self._two_pass_lightmaps:
-            with self._point_light_shadow_fb.bind():
-                glDepthFunc(GL_ALWAYS)
-                glUseProgram(_CLEAR_LINES_MAPS_PROGRAM.get())
-                glBindVertexArray(viewport.get_dummy_vao())
-                glDrawArrays(GL_TRIANGLES, 0, 3)
+        if not self._line_maps_baked:
+            self._generate_line_maps()
+            self._line_maps_baked = True
 
-                glDepthFunc(GL_LESS)
-                glUseProgram(_DRAW_LINES_MAPS_PROGRAM.get(APPLY_BIAS=1))
-                glBindTextureUnit(0, self._line_texture)
-                glBindTextureUnit(1, self._point_lights)
-                glUniform1i(0, 0)
-                glUniform2f(1, 1.0 / self.num_point_lights, 0.5 / LINEMAP_RESOLUTION)
-                glBindVertexArray(viewport.get_dummy_vao())
-                glDrawArraysInstanced(
-                    GL_LINES,
-                    0,
-                    2 * 2 * self.num_lines, # 2 * 2 * lineCount
-                    self.num_point_lights   # pointLightCount
-                )
-
-        # one pass version of generating light shadow maps
-        # slower sadly.
-        # On the flipside, it wouldn't require a depth buffer
-        # or a clear pass.
-        else:
-            with self._point_light_shadow_fb.bind():
-                glDepthFunc(GL_ALWAYS)
-                glDepthMask(GL_FALSE)
-                glUseProgram(_DRAW_LINES_MAPS_ONE_PASS_PROGRAM.get())
-                glBindVertexArray(viewport.get_dummy_vao())
-                glBindTextureUnit(0, self._line_texture)
-                glBindTextureUnit(1, self._point_lights)
-                glUniform2i(0, self.num_point_lights, self.num_lines)
-                glDrawArrays(GL_TRIANGLES, 0, 3)
-                glDepthMask(GL_TRUE)
-                glDepthFunc(GL_LESS)
-
-        # Generate light bboxs
-        glViewport(0, 0, 1, self.num_point_lights)
-        with self._point_light_bbox_fb.bind():
-            glUseProgram(_DRAW_LIGHTS_BBOX_PROGRAM.get())
-            glBindVertexArray(viewport.get_dummy_vao())
-            glBindTextureUnit(0, self._point_lights_shadow_plane.value)
-            glBindTextureUnit(1, self._point_lights)
-            glUniform2f(0, self.num_point_lights, 1.0 / LINEMAP_RESOLUTION)
-            glDrawArrays(GL_TRIANGLES, 0, 3)
-
+        # Bake lights
+        if not self._lights_baked:
+            self._bake_lights()
+            self._lights_baked = True
 
         # Per character shared visibility
         # Framebuffer really isnt needed here, could just draw directly the GL_BACK
         # it should use the FOW grid in some mildly intelligent way to account for previously seen areas
         glViewport(0, 0, wnd.width, wnd.height)
+        glClearColor(0.5, 0.5, 0.5, 0.0)
         with self._shared_vis_fb.bind():
 
             # Draw occlusion
@@ -937,28 +979,8 @@ class Renderer(object):
             self.triangle_screen.draw()
 
 
-            # Draw pointlights
-            if True:
-                # glStencilFunc(GL_ALWAYS, 0, 0xFF)
-                glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_FALSE)
-                glDepthMask(GL_FALSE)
-                glDisable(GL_DEPTH_TEST)
-                glEnable(GL_BLEND)
-                glBlendFunc(GL_ONE, GL_ONE)
-                glUseProgram(_DRAW_POINTLIGHTS_PROGRAM.get())
-                glUniform1f(0, 1.0/self.num_point_lights)
-                glBindTextureUnit(0, self._point_lights_bbox_bbox.value)
-                glBindTextureUnit(1, self._point_lights)
-                glBindTextureUnit(2, self._point_lights_shadow_plane.value)
-                glBindVertexArray(viewport.get_dummy_vao())
-                glDrawArrays(GL_TRIANGLES, 0, 6 * self.num_point_lights)
-                # glDrawArrays(GL_TRIANGLES, 0, 6 * 1)
-                glBlendFunc(GL_ONE, GL_ZERO)
-                glDisable(GL_BLEND)
-                glEnable(GL_DEPTH_TEST)
-                glDepthMask(GL_TRUE)
-                glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE)
-
+            # Apply lighting
+            self._apply_lighting()
 
             # Vis point light surface
             if False:

@@ -4,9 +4,8 @@
 #include "intersection.glsl"
 
 
-layout(binding=0) uniform sampler2D lightBboxs;
-layout(binding=1) uniform sampler2D lights;
-layout(binding=2) uniform sampler2D lightMap;
+layout(binding=0) uniform sampler2D lights;
+layout(binding=1) uniform sampler2D lightMap;
 
 layout(location=0)  uniform float inverseTextureSize;
 
@@ -20,10 +19,10 @@ void main()
 {
     int pointLightId = gl_VertexID / 6;
 
-    vec4 bbox = texelFetch(lightBboxs, ivec2(0, pointLightId), 0);
     vec4 lightsDataA = texelFetch(lights, ivec2(0, pointLightId), 0);
     vec4 lightsDataB = texelFetch(lights, ivec2(1, pointLightId), 0);
     vec2 lightsP = lightsDataA.xy;
+    vec4 bbox = vec4(lightsP - lightsDataA.z, lightsP + lightsDataA.z);
 
     int quadId = triangleToQuadVertexIdZ(gl_VertexID % 6);
     vec2 P = vec2(
