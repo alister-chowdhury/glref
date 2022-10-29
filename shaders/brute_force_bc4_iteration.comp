@@ -1,0 +1,130 @@
+#version 460 core
+
+layout(local_size_x=8, local_size_y=8) in;
+
+
+layout(binding=0)           uniform sampler2D alphaImage;
+layout(binding=1, rgba32f)  uniform image2D iterationImage;
+
+layout(location = 0) uniform int iterationValue; // [1, 255]
+layout(location = 1) uniform ivec2 BCTextureSize;
+layout(location = 2) uniform vec2 inverseTextureSize;
+
+
+// Mode 0
+// Basically a 3 bit linear interpolation (8 values)
+float accumSqDistMode0(vec4 values, float a, float b)
+{
+    float scale = 7.0f / (b - a);
+    vec4 proj = (values - a) * scale + 0.5f;
+    ivec4 quantId = clamp(ivec4(proj), ivec4(0), ivec4(7));
+    vec4 quantValue = vec4(quantId) / scale + a;
+    vec4 diff = quantValue - values;
+    return dot(diff, diff);
+}
+
+// Mode 1
+// 6 values to interpolate between with 0 and 1 always
+// being dedicated.
+float accumSqDistMode1(vec4 values, float a, float b)
+{
+    float scale = 5.0f / (b - a);
+    vec4 proj = (values - a) * scale + 0.5f;
+    ivec4 quantId = clamp(ivec4(proj), ivec4(0), ivec4(5));
+    vec4 quantValue = vec4(quantId) / scale + a;
+    vec4 diff = quantValue - values;
+
+    if((values.x == 0) || (values.x == 1)) { diff.x = 0; }
+    if((values.y == 0) || (values.y == 1)) { diff.y = 0; }
+    if((values.z == 0) || (values.z == 1)) { diff.z = 0; }
+    if((values.w == 0) || (values.w == 1)) { diff.w = 0; }
+
+    return dot(diff, diff);
+}
+
+
+void main()
+{
+    ivec2 coord = ivec2(gl_GlobalInvocationID.xy);
+    bool validCoord = all(lessThan(coord, BCTextureSize));
+    if(!validCoord)
+    {
+        return;
+    }
+
+    // Fetch the relevant reference texels in no particular order
+    // since, we aren't actually going to encode the final result at
+    // this stage.
+    vec2 UV = (vec2(coord << 2) + 0.5) * inverseTextureSize;
+    vec4 y0 = textureGather(alphaImage, UV, 0);
+    vec4 y1 = textureGather(alphaImage, UV + vec2(inverseTextureSize.x * 2, 0), 0);
+    vec4 y2 = textureGather(alphaImage, UV + inverseTextureSize * 2, 0);
+    vec4 y3 = textureGather(alphaImage, UV + vec2(0, inverseTextureSize.y * 2), 0);
+
+    vec4 currentIteration = imageLoad(iterationImage, coord);
+    vec2 ranges = currentIteration.xy;
+    float bestSqrDist = currentIteration.z;
+
+    if(bestSqrDist == 0)
+    {
+        return;
+    }
+
+    const float u8Scale = 1.0f / 255.0f;
+    float b = float(iterationValue) * u8Scale;
+    for(int i=0; i<iterationValue; ++i)
+    {
+        float a = float(i) * u8Scale;
+
+        {
+            float sqrDist = accumSqDistMode0(y0, a, b)
+                          + accumSqDistMode0(y1, a, b)
+                          + accumSqDistMode0(y2, a, b)
+                          + accumSqDistMode0(y3, a, b);
+            
+            if(sqrDist < bestSqrDist)
+            {
+                bestSqrDist = sqrDist;
+                ranges = vec2(a, b);
+                if(bestSqrDist == 0)
+                {
+                    break;
+                }
+            }
+        }
+
+        {
+            float sqrDist = accumSqDistMode1(y0, a, b)
+                          + accumSqDistMode1(y1, a, b)
+                          + accumSqDistMode1(y2, a, b)
+                          + accumSqDistMode1(y3, a, b);
+            
+            if(sqrDist < bestSqrDist)
+            {
+                bestSqrDist = sqrDist;
+                ranges = vec2(b, a);
+                if(bestSqrDist == 0)
+                {
+                    break;
+                }
+            }
+        }
+    }
+
+
+    // Fast mode as a reference
+#if 0
+    vec4 min0 = min(min(y0, y1), min(y2, y3));
+    vec4 max0 = max(max(y0, y1), max(y2, y3));
+    ranges = vec2(
+        min(min(min0.x, min0.y), min(min0.z, min0.w)),
+        max(max(max0.x, max0.y), max(max0.z, max0.w))
+    );
+#endif
+
+    if(currentIteration.z > bestSqrDist)
+    {
+        vec4 newIteration = vec4(ranges, bestSqrDist, 0);
+        imageStore(iterationImage, coord, newIteration);
+    }
+}

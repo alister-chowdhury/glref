@@ -1,0 +1,149 @@
+#version 460 core
+
+layout(local_size_x=8, local_size_y=8) in;
+
+
+layout(binding=0)                    uniform sampler2D alphaImage;
+readonly layout(binding=1, rgba32f)  uniform image2D iterationImage;
+layout(binding=2, rg32ui)            uniform uimage2D finalImage;
+
+layout(location = 0) uniform ivec2 BCTextureSize;
+layout(location = 1) uniform vec2 inverseTextureSize;
+
+
+uvec2 makeBlock(float a, float b, uvec4 quantR0, uvec4 quantR1, uvec4 quantR2, uvec4 quantR3)
+{
+    quantR0 <<= uvec4(0u, 3u, 6u, 9u);
+    quantR1 <<= uvec4(12u, 15u, 18u, 21u);
+    quantR2 <<= uvec4(0u, 3u, 6u, 9u);
+    quantR3 <<= uvec4(12u, 15u, 18u, 21u);
+
+    uint quant0 = quantR0.x | quantR0.y | quantR0.z | quantR0.w
+                | quantR1.x | quantR1.y | quantR1.z | quantR1.w
+                ;
+
+    uint quant1 = quantR2.x | quantR2.y | quantR2.z | quantR2.w
+                | quantR3.x | quantR3.y | quantR3.z | quantR3.w
+                ;
+
+
+    uint aBits = uint(a * 255.0f);
+    uint bBits = uint(b * 255.0f);
+
+    return uvec2(
+        bBits | (aBits << 8) | (quant0 << 16),
+        (quant0 >> 16) | (quant1 << 8)
+    );
+}
+
+
+void finalizeValueMode0(inout uint value)
+{
+    value = 7u - value;
+    if(value != 0) { ++value; }
+    if(value == 8) { value = 1; }
+}
+
+
+void finalizeValueMode0(inout uvec4 value)
+{
+    finalizeValueMode0(value.x);
+    finalizeValueMode0(value.y);
+    finalizeValueMode0(value.z);
+    finalizeValueMode0(value.w);
+}
+
+
+uvec2 packMode0(vec4 R0, vec4 R1, vec4 R2, vec4 R3, float a, float b)
+{
+    float scale = 7.0f / (b - a);
+    
+    vec4 projR0 = (R0 - a) * scale + 0.5f;
+    vec4 projR1 = (R1 - a) * scale + 0.5f;
+    vec4 projR2 = (R2 - a) * scale + 0.5f;
+    vec4 projR3 = (R3 - a) * scale + 0.5f;
+
+    uvec4 quantR0 = uvec4(clamp(ivec4(projR0), ivec4(0), ivec4(7)));
+    uvec4 quantR1 = uvec4(clamp(ivec4(projR1), ivec4(0), ivec4(7)));
+    uvec4 quantR2 = uvec4(clamp(ivec4(projR2), ivec4(0), ivec4(7)));
+    uvec4 quantR3 = uvec4(clamp(ivec4(projR3), ivec4(0), ivec4(7)));
+
+    finalizeValueMode0(quantR0);
+    finalizeValueMode0(quantR1);
+    finalizeValueMode0(quantR2);
+    finalizeValueMode0(quantR3);
+
+    return makeBlock(a, b, quantR0, quantR1, quantR2, quantR3);
+}
+
+
+void finalizeValueMode1(inout uint value, float original)
+{
+    if(original == 0) { value = 6; return; }
+    if(original == 1) { value = 7; return; }
+    value = 5u - value;
+    if(value != 0) { ++value; }
+    if(value == 6) { value = 1; }
+}
+
+
+void finalizeValueMode1(inout uvec4 value, vec4 original)
+{
+    finalizeValueMode1(value.x, original.x);
+    finalizeValueMode1(value.y, original.y);
+    finalizeValueMode1(value.z, original.z);
+    finalizeValueMode1(value.w, original.w);
+}
+
+
+uvec2 packMode1(vec4 R0, vec4 R1, vec4 R2, vec4 R3, float a, float b)
+{
+    float scale = 5.0f / (a - b);
+    
+    vec4 projR0 = (R0 - b) * scale + 0.5f;
+    vec4 projR1 = (R1 - b) * scale + 0.5f;
+    vec4 projR2 = (R2 - b) * scale + 0.5f;
+    vec4 projR3 = (R3 - b) * scale + 0.5f;
+
+    uvec4 quantR0 = uvec4(clamp(ivec4(projR0), ivec4(0), ivec4(5)));
+    uvec4 quantR1 = uvec4(clamp(ivec4(projR1), ivec4(0), ivec4(5)));
+    uvec4 quantR2 = uvec4(clamp(ivec4(projR2), ivec4(0), ivec4(5)));
+    uvec4 quantR3 = uvec4(clamp(ivec4(projR3), ivec4(0), ivec4(5)));
+
+    finalizeValueMode1(quantR0, R0);
+    finalizeValueMode1(quantR1, R1);
+    finalizeValueMode1(quantR2, R2);
+    finalizeValueMode1(quantR3, R3);
+
+    return makeBlock(b, a, quantR0, quantR1, quantR2, quantR3);
+}
+
+
+void main()
+{
+    ivec2 coord = ivec2(gl_GlobalInvocationID.xy);
+    bool validCoord = all(lessThan(coord, BCTextureSize));
+    if(!validCoord)
+    {
+        return;
+    }
+
+    vec2 UV = (vec2(coord << 2) + 0.5) * inverseTextureSize;
+    vec4 y0 = textureGather(alphaImage, UV, 0);
+    vec4 y1 = textureGather(alphaImage, UV + vec2(inverseTextureSize.x * 2, 0), 0);
+    vec4 y2 = textureGather(alphaImage, UV + vec2(0, inverseTextureSize.y * 2), 0);
+    vec4 y3 = textureGather(alphaImage, UV + inverseTextureSize * 2, 0);
+
+    vec4 R0 = vec4(y0.w, y0.z, y1.w, y1.z);
+    vec4 R1 = vec4(y0.x, y0.y, y1.x, y1.y);
+    vec4 R2 = vec4(y2.w, y2.z, y3.w, y3.z);
+    vec4 R3 = vec4(y2.x, y2.y, y3.x, y3.y);
+
+    vec2 ranges = imageLoad(iterationImage, coord).xy;
+    float a = min(ranges.x, ranges.y);
+    float b = max(ranges.x, ranges.y);
+    bool mode = ranges.x < ranges.y;
+
+    uvec2 value = mode ? packMode0(R0, R1, R2, R3, a, b) : packMode1(R0, R1, R2, R3, a, b);
+    imageStore(finalImage, coord, uvec4(value, 0, 0));
+}
