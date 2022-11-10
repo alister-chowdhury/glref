@@ -1,0 +1,35 @@
+
+
+
+
+Optimizations:
+Scan / Writeback Range:
+
+    ∞
+    ∫ e^(-x * a^-1) dx = a
+    0
+
+    Integral(f, 0, 3 sigma * sigmal) / (sigma * sigma) ~= 0.95
+    Thus: ceil(3 * sigma * sigma)
+          Should account for around 95% of the energy
+
+
+    If we want to target a minimum value:
+    -loge(minval) * sigma * sigma
+    or
+    -log2(minval) * loge(2) * sigma * sigma
+
+
+    If we want to compute the percentage covered:
+    -e^(-x/a) + 1
+
+    So if we want to target a specific percentage:
+    range = -loge(1 - percentage) (sigma^2)
+    7 * sigma * sigma > 99.99% accuracy 
+
+
+WEBGL Stuff
+No compute shader, can construct a triangle for point replacement / injections
+    XOffsets = (0, 1, 0)    | float(index & 1)
+    YOffsets = (0, 0.5, 1)  | float(index) * 0.5
+    (pX + XOffset[id], pY + YOffsets[i]) * invSize * 2 - 1
