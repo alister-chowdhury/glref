@@ -1,5 +1,5 @@
 import os
-from math import ceil
+from math import ceil, log
 import random
 from PIL import Image   # poor mans OIIO
 
@@ -40,6 +40,12 @@ _VOID_AND_CLUSTER_UPDATE = viewport.make_permutation_program(
     GL_FRAGMENT_SHADER = os.path.join(_SHADER_DIR, "bluenoise", "void_and_cluster_update.frag")
 )
 
+_VOID_AND_CLUSTER_PARTIAL_UPDATE = viewport.make_permutation_program(
+    _DEBUGGING,
+    GL_VERTEX_SHADER = os.path.join(_SHADER_DIR, "bluenoise", "void_and_cluster_partial_update.vert"),
+    GL_FRAGMENT_SHADER = os.path.join(_SHADER_DIR, "bluenoise", "void_and_cluster_update.frag")
+)
+
 _VIS_BLUENOISE = viewport.make_permutation_program(
     _DEBUGGING,
     GL_VERTEX_SHADER = os.path.join(_SHADER_DIR, "draw_full_screen.vert"),
@@ -60,14 +66,30 @@ class Renderer(object):
 
         self._iteration = 0
         self._max_iterations_per_frame = 64
-        self._texture_size = (128, 128)
+        self._texture_size = (64, 64)
         self._background_seed = random.randint(0, 0x7fffff)
         self._inv_texture_size = (1.0 / self._texture_size[0], 1.0 / self._texture_size[1])
         self._inv_num_pixels = 1.0 / (self._texture_size[0] * self._texture_size[1] - 1)
         self._sigma = 1.9
-
         log2e = 1.4426950408889634073599246810018
         self._exp_multiplier = (self._sigma ** -2) * log2e
+
+        # Figure out the update span range, and if we just need to fallback
+        # on updating the full screen
+        self._target_accuracy = 0.99
+
+        if self._target_accuracy >= 1.0 or self._target_accuracy <= 0.0:
+            self._update_span = max(self._texture_size[0], self._texture_size[1])
+        else:
+            self._update_span = int(ceil(-log(1 - self._target_accuracy) * self._sigma ** 2))
+
+        # Only do partial updates if there are no overlaps
+        self._partial_update_bias = 0.01
+        self._do_partial_update = (
+            (self._update_span * 2 + self._partial_update_bias)
+            < min(self._texture_size[0], self._texture_size[1])
+        )
+
 
         self._tile_preview = 0
 
@@ -79,6 +101,7 @@ class Renderer(object):
         self._void_and_cluster_init_program = _VOID_AND_CLUSTER_INIT.get()
         self._void_and_cluster_reduce_init_program = _VOID_AND_CLUSTER_REDUCE_INIT.get()
         self._void_and_cluster_reduce_iter_program = _VOID_AND_CLUSTER_REDUCE_ITER.get()
+        self._void_and_cluster_update_partial_program = _VOID_AND_CLUSTER_PARTIAL_UPDATE.get()
         self._void_and_cluster_update_program = _VOID_AND_CLUSTER_UPDATE.get()
 
         self._noise_energy_fb_target = viewport.FramebufferTarget(
@@ -187,7 +210,11 @@ class Renderer(object):
                 glBlendFunc(GL_ONE, GL_ONE)
                 glViewport(0, 0, self._texture_size[0], self._texture_size[1])
                 with self._noise_energy_fb.bind():
-                    glUseProgram(self._void_and_cluster_update_program)
+                    if self._do_partial_update:
+                        glUseProgram(self._void_and_cluster_update_partial_program)
+                        glUniform1i(3, self._update_span)
+                    else:
+                        glUseProgram(self._void_and_cluster_update_program)
                     glBindTextureUnit(0, collapsed_void_data)
                     glUniform4f(
                         0,
@@ -199,7 +226,11 @@ class Renderer(object):
                     glUniform1f(1, self._exp_multiplier)
                     glUniform1f(2, 1.0 - (self._iteration * self._inv_num_pixels))
                     glBindVertexArray(viewport.get_dummy_vao())
-                    glDrawArrays(GL_TRIANGLES, 0, 3)
+
+                    if self._do_partial_update:
+                        glDrawArrays(GL_TRIANGLES, 0, 3 * 8)
+                    else:
+                        glDrawArrays(GL_TRIANGLES, 0, 3)
                     self._iteration += 1
 
                 glBlendFunc(GL_ONE, GL_ZERO)
