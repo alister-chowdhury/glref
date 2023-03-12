@@ -156,7 +156,6 @@ class ProxyFramebufferTarget(object):
         return self._target.texture
 
 
-
 class CubemapFramebufferTarget(FramebufferTarget):
 
     def __init__(self, pixel_type, custom_texture_settings=None):
@@ -305,6 +304,77 @@ class CubemapFramebuffer(Framebuffer):
         for render_target in self._render_targets:
             render_target._bind(self.value, layer)
         glDrawBuffers(len(self._colour_attachments), self._colour_attachments)
+        yield
+        glBindFramebuffer(GL_FRAMEBUFFER, 0)
+        glDrawBuffer(GL_BACK)
+
+
+class WrappedFramebuffer(object):
+    """Wrapper around existing textures, for finer control over things like mips."""
+
+    def __init__(self):
+        self._built = False
+        self._next_colour_id = GL_COLOR_ATTACHMENT0
+        self._used_attachment_ids = []
+        self._intitialized = False
+        self._framebuffer_ptr = ctypes.c_int()
+        self._framebuffer = None
+        self._create()
+
+    def __del__(self):
+        self._destroy()
+
+    def add_col_attachment(self, texture, mip=0):
+        colour_id = self._next_colour_id
+        self._next_colour_id += 1
+        self._add(texture, mip, colour_id)
+        return self
+
+    def add_depth_stencil(self, texture, mip=0):
+        self._add(texture, mip, GL_DEPTH_STENCIL_ATTACHMENT)
+        return self
+
+    def add_depth(self, texture, mip=0):
+        self._add(texture, mip, GL_DEPTH_ATTACHMENT)
+        return self
+
+    def add_stencil(self, texture, mip=0):
+        self._add(texture, mip, GL_STENCIL_ATTACHMENT)
+        return self
+
+    def _add(self, texture, mip, attachment_id):
+        self._built = False
+        if attachment_id in self._used_attachment_ids:
+            raise RuntimeError("Value: {0} already in use!".format(attachment_id))
+        glNamedFramebufferTexture(self.value, attachment_id, texture, mip)
+        self._used_attachment_ids.append(attachment_id)
+
+    def _create(self):
+        if self._intitialized:
+            return
+        glCreateFramebuffers(1, self._framebuffer_ptr)
+        self.value = self._framebuffer_ptr.value
+
+    def _destroy(self):
+        if self._intitialized:
+            glDeleteFramebuffers(1, self._framebuffer_ptr)
+            self._intitialized = False
+        self.value = None
+        self._built = False
+        self._next_colour_id = GL_COLOR_ATTACHMENT0
+        self._used_attachment_ids = []
+
+    @contextmanager
+    def bind(self):
+        """Bind the framebuffer to be drawn too."""
+        if not self._built:
+            # Always check that our framebuffer is ok
+            if(glCheckNamedFramebufferStatus(self.value, GL_FRAMEBUFFER) != GL_FRAMEBUFFER_COMPLETE):
+                print("Framebuffer fail")
+                exit(-1)
+            self._built = True
+        glBindFramebuffer(GL_FRAMEBUFFER, self.value)
+        glDrawBuffers(len(self._used_attachment_ids), self._used_attachment_ids)
         yield
         glBindFramebuffer(GL_FRAMEBUFFER, 0)
         glDrawBuffer(GL_BACK)

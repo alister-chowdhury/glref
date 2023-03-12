@@ -27,6 +27,7 @@ class Window(object):
         self.on_mouse = None
         self.on_drag = None
 
+        self._mouse_button = None
         self._last_drag_x = 0
         self._last_drag_y = 0
 

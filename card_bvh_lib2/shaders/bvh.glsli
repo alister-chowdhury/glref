@@ -1,0 +1,203 @@
+#ifndef BVH_H
+#define BVH_H 1
+
+
+struct CardData
+{
+    vec3 origin;
+    vec2 localExtent;
+    vec3 axisX;
+    vec3 axisY;
+    vec3 axisZ;
+    vec2 halfInvlocalExtent;
+};
+
+
+// Packed in order of first used
+// -----------------------------
+// origin.x      origin.y origin.z             localExtent.x
+// localExtent.y axisZ.x  axisZ.y              axisZ.z
+// axisY.x       axisY.y  axisY.z              axisX.x
+// axisX.y       axisX.z  halfInvlocalExtent.x halfInvlocalExtent.y
+
+CardData unpackCard(vec4 V0, vec4 V1, vec4 V2, vec4 V3)
+{
+    CardData result;
+    result.origin = V0.xyz;
+    result.localExtent = vec2(V0.w, V1.x);
+    result.axisZ = V1.yzw;
+    result.axisY = V2.xyz;
+    result.axisX = vec3(V2.w, V3.xy);
+    result.halfInvlocalExtent = V3.zw;
+    return result;
+}
+
+
+#define loadCardFromBuffer(buffer, offset)\
+            unpackCard(buffer[offset],\
+                       buffer[offset+1],\
+                       buffer[offset+2],\
+                       buffer[offset+3])
+
+
+CardData loadCardFromImage(image1D image, int offset)
+{
+    return unpackCard(imageLoad(image, offset),
+                      imageLoad(image, offset+1),
+                      imageLoad(image, offset+2),
+                      imageLoad(image, offset+3));
+}
+
+
+// https://www.geogebra.org/m/nuqptz5p
+bool cardIntersection(vec3 ro, vec3 rd, CardData card, inout vec2 outUv, inout float hitT)
+{
+    vec3 originOffset = ro - (card.origin + card.axisZ * vec3(card.localExtent, 0));
+    float t = -dot(card.axisZ, originOffset) / dot(card.axisZ, rd);
+    if((t > 0) && (t < hitT))
+    {
+        vec3 projected = originOffset + t * rd;
+        vec2 ndcUv = vec2(dot(card.axisX, projected), dot(card.axisY, projected));
+        if(all(lessThan(abs(ndcUv), card.localExtent.xy)))
+        {
+            // outUv = ndcUv / card.localExtent.xy * 0.5 + 0.5;
+            outUv = ndcUv * card.halfInvlocalExtent + 0.5;
+            hitT = t;
+            return true;
+        }
+    }
+    return false;
+}
+
+
+// https://www.geogebra.org/3d/rswecyg8
+bool rayBoxIntersects(vec3 ro,
+                        vec3 invRd,
+                        vec3 boxMin,
+                        vec3 boxMax,
+                        float maxT,
+                        inout float hitT)
+{
+    vec3 plane0 = (boxMin - ro) * invRd;
+    vec3 plane1 = (boxMax - ro) * invRd;
+    vec3 near = min(plane0, plane1);
+    vec3 far = max(plane0, plane1);
+    float nearDist = max(near.x, max(near.y, near.z));
+    float farDist = min(far.x, min(far.y, far.z));
+    if(nearDist < min(farDist, maxT))
+    {
+        hitT = max(0, nearDist);
+        return true;
+    }
+    return false;
+}
+
+
+float safeInverse(float x)
+{
+    // can be bit-twiddled
+    if(abs(x) < 8.27181e-25) { x = x < 0 ? -8.27181e-25 : 8.27181e-25; }
+    return 1.0/x;
+}
+
+
+void rayCastBvh(vec3 ro, vec3 rd, inout float hitT, inout uint hitObject, inout vec2 UV)
+{
+    vec3 invRd = vec3(safeInverse(rd.x), safeInverse(rd.y), safeInverse(rd.z));
+    
+    int currentStackIndex = 0;
+    uint stack[16];
+    stack[0] = 0;
+
+
+    while(currentStackIndex >= 0)
+    {
+
+        uvec2 found = uvec2(0xffffffffu, 0xffffffffu);
+
+        // Find the next triangle(s) to intersect against
+        while(currentStackIndex >= 0)
+        {
+            uint bvhNodeIndex = stack[currentStackIndex--];
+
+            vec3 bboxMinA;
+            vec3 bboxMaxA;
+            vec3 bboxMinB;
+            vec3 bboxMaxB;
+            getBvhNodeBounds(bvhNodeIndex, bboxMinA, bboxMaxA, bboxMinB, bboxMaxB);
+
+            float hitA;
+            float hitB;
+            bool bHitA = rayBoxIntersects(ro, invRd, bboxMinA, bboxMaxA, hitT, hitA);
+            bool bHitB = rayBoxIntersects(ro, invRd, bboxMinB, bboxMaxB, hitT, hitB);
+
+            if(bHitA || bHitB)
+            {
+                uvec4 typeAndIndex = getBvhNodeTypeAndIndex(bvhNodeIndex);
+
+                // We have hit two children
+                if(bHitA && bHitB)
+                {
+                    // Of the same type
+                    if(typeAndIndex.x == typeAndIndex.z)
+                    {
+                        if(typeAndIndex.x == BVH_NODE)
+                        {
+                            if(hitB < hitA)
+                            {
+                                typeAndIndex.yw = typeAndIndex.wy;
+                            }
+                            stack[currentStackIndex++] = typeAndIndex.w;
+                            stack[currentStackIndex++] = typeAndIndex.y;
+                            continue;
+                        }
+                        else
+                        {
+                            found = typeAndIndex.yw;
+                            break;
+                        }                    
+                    }
+
+                    // Differing types
+                    else
+                    {
+                        uint insertIndex = typeAndIndex.x == BVH_NODE ? typeAndIndex.y : typeAndIndex.w;
+                        uint triangleIndex = typeAndIndex.x == BVH_NODE ? typeAndIndex.w : typeAndIndex.y;
+                        stack[currentStackIndex++] = insertIndex;
+                        found.x = triangleIndex;
+                        break;
+                    }
+                }
+
+                // Only hit one child
+                uint targetType = bHitA ? typeAndIndex.x : typeAndIndex.z;
+                uint targetIndex = bHitA ? typeAndIndex.y : typeAndIndex.w;
+                if(targetType == BVH_NODE)
+                {
+                    stack[currentStackIndex++] = targetIndex;
+                }
+                else
+                {
+                    found.x = targetIndex;
+                    break;
+                }
+            }
+        }
+
+
+        // Intersect triangles!
+        if(found.x != 0xffffffffu)
+        {
+            // Triangle intersection #1
+            if(found.y != 0xffffffffu)
+            {
+                // Triangle intersection #2
+            }
+        }
+    }
+}
+
+
+
+
+#endif // BVH_H

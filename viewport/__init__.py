@@ -7,6 +7,7 @@ from . framebuffer import (
     ProxyFramebufferTarget,
     CubemapFramebuffer,
     CubemapFramebufferTarget,
+    WrappedFramebuffer
 )
 from . geometry import (
     StaticGeometry,

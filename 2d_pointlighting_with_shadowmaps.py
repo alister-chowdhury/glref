@@ -164,6 +164,7 @@ void main()
 {
 
     const vec2 invTextureSize = 1.0 / vec2(textureSize(pointLightShadowMap, 0));
+    const float textureWidth = vec2(textureSize(pointLightShadowMap, 0)).x;
 
     vec3 totalAccum = vec3(0.0);
 
@@ -178,6 +179,7 @@ void main()
         const float Y = (0.5 + float(pointLightID)) * invTextureSize.y;
         const float Z = 1.0 - attenuation;
 
+#if 0
         float localAccum = (
             texture(pointLightShadowMap, vec3(X, Y, Z))
             + textureLod(pointLightShadowMap, vec3(X + invTextureSize.x, Y, Z), 0) * 0.5
@@ -187,6 +189,13 @@ void main()
 
         ) / 2.5;
 
+#else
+        
+        // PCF, needs some sort of special sauce to work better at grazing angles
+        float b0 = texture(pointLightShadowMap, vec3(X, Y, Z));
+        float localAccum = b0;
+
+#endif
         totalAccum += vec3(localAccum * attenuation);
     }
 
@@ -297,6 +306,9 @@ class Renderer(object):
                 GL_TEXTURE_WRAP_T: GL_CLAMP_TO_EDGE,
                 GL_TEXTURE_MIN_FILTER: GL_LINEAR,
                 GL_TEXTURE_MAG_FILTER: GL_LINEAR,
+                # Bad for PCF, unless doing manually interp
+                # GL_TEXTURE_MIN_FILTER: GL_NEAREST,
+                # GL_TEXTURE_MAG_FILTER: GL_NEAREST,
                 GL_TEXTURE_COMPARE_FUNC: GL_LEQUAL,
                 GL_TEXTURE_COMPARE_MODE: GL_COMPARE_REF_TO_TEXTURE,
             }

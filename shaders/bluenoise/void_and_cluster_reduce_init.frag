@@ -2,6 +2,7 @@
 
 #include "common.glsli"
 
+
 layout(binding=0)  uniform sampler2D noiseEnergyMap;
 layout(location=0) uniform uvec3 maxSizeAndSeed;
 layout(location=0) out vec2 outVoidData;
