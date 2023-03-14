@@ -10,11 +10,6 @@
 #endif // LINE_BVH_V1_FORCE_FULL_TRAVERSAL
 
 
-#ifndef LINE_BVH_V1_RECHECK_DISTANCE
-#define LINE_BVH_V1_RECHECK_DISTANCE 0
-#endif // LINE_BVH_V1_RECHECK_DISTANCE
-
-
 
 layout(binding=LINE_BVH_V1_LOC) uniform sampler1D v1LinesBvh;
 
@@ -26,9 +21,6 @@ struct LineBvhV1Stack
 {
     int index;
     int stack[LINE_BVH_V1_STACK_SIZE];
-#if LINE_BVH_V1_RECHECK_DISTANCE
-    float stackdist[LINE_BVH_V1_STACK_SIZE];
-#endif // LINE_BVH_V1_RECHECK_DISTANCE
 };
 
 
@@ -129,31 +121,19 @@ LineBvhV1Result traceLineBvhV1(vec2 ro, vec2 rd, float maxDist, bool stopOnFirst
     result.numLineIntersections = 0;
 
     LineBvhV1Stack stack;
-    stack.stack[0] = 0;
     stack.index = 0;
 
-#if LINE_BVH_V1_RECHECK_DISTANCE
-    stack.stackdist[0] = 0;
-#endif // LINE_BVH_V1_RECHECK_DISTANCE
-
     vec2 invRd = 1.0 / rd;
+    bool done = false;
+    int head = 0;
 
-    while(stack.index != -1)
+    while(!done)
     {
-        int nodeIndex = stack.stack[stack.index--];
-
-#if LINE_BVH_V1_RECHECK_DISTANCE
-        if(stack.stackdist[stack.index+1] >= result.hitDistSq)
-        {
-            continue;
-        }
-#endif // LINE_BVH_V1_RECHECK_DISTANCE
-
         result.numNodesVisited += 1;
 
-        vec4 v0 = texelFetch(v1LinesBvh, nodeIndex, 0);
-        vec4 v1 = texelFetch(v1LinesBvh, nodeIndex + 1, 0);
-        vec4 v2 = texelFetch(v1LinesBvh, nodeIndex + 2, 0);
+        vec4 v0 = texelFetch(v1LinesBvh, head, 0);
+        vec4 v1 = texelFetch(v1LinesBvh, head + 1, 0);
+        vec4 v2 = texelFetch(v1LinesBvh, head + 2, 0);
 
         vec2 leftMeta = v0.xy;
         vec4 leftData = v1;
@@ -193,22 +173,26 @@ LineBvhV1Result traceLineBvhV1(vec2 ro, vec2 rd, float maxDist, bool stopOnFirst
                 addToStackDistances.xy = addToStackDistances.yx;
                 addToStackIds.xy = addToStackIds.yx;
             }
-        }
 
-        if(leftAddToStack)
-        {
             stack.stack[++stack.index] = addToStackIds.x;
-#if LINE_BVH_V1_RECHECK_DISTANCE
-            stack.stackdist[stack.index] = addToStackDistances.x * addToStackDistances.x;
-#endif // LINE_BVH_V1_RECHECK_DISTANCE
+            head = addToStackIds.y;
         }
-
-        if(rightAddToStack)
+        else if(leftAddToStack)
         {
-            stack.stack[++stack.index] = addToStackIds.y;
-#if LINE_BVH_V1_RECHECK_DISTANCE
-            stack.stackdist[stack.index] = addToStackDistances.y * addToStackDistances.y;
-#endif // LINE_BVH_V1_RECHECK_DISTANCE
+            head = addToStackIds.x;
+
+        }
+        else if(rightAddToStack)
+        {
+            head = addToStackIds.y;
+        }
+        else if(stack.index > 0)
+        {
+            head = stack.stack[stack.index--];
+        }
+        else
+        {
+            done = true;
         }
     }
 
@@ -287,29 +271,18 @@ FindNearestLineBvhV1Result findNearestLineBvhV1(vec2 ro, float maxDist)
     result.numLineIntersections = 0;
 
     LineBvhV1Stack stack;
-    stack.stack[0] = 0;
     stack.index = 0;
 
-#if LINE_BVH_V1_RECHECK_DISTANCE
-    stack.stackdist[0] = 0;
-#endif // LINE_BVH_V1_RECHECK_DISTANCE
+    bool done = false;
+    int head = 0;
 
-    while(stack.index != -1)
+    while(!done)
     {
-        int nodeIndex = stack.stack[stack.index--];
-
-#if LINE_BVH_V1_RECHECK_DISTANCE
-        if(stack.stackdist[stack.index+1] >= result.hitDistSq)
-        {
-            continue;
-        }
-#endif // LINE_BVH_V1_RECHECK_DISTANCE
-
         result.numNodesVisited += 1;
 
-        vec4 v0 = texelFetch(v1LinesBvh, nodeIndex, 0);
-        vec4 v1 = texelFetch(v1LinesBvh, nodeIndex + 1, 0);
-        vec4 v2 = texelFetch(v1LinesBvh, nodeIndex + 2, 0);
+        vec4 v0 = texelFetch(v1LinesBvh, head, 0);
+        vec4 v1 = texelFetch(v1LinesBvh, head + 1, 0);
+        vec4 v2 = texelFetch(v1LinesBvh, head + 2, 0);
 
         vec2 leftMeta = v0.xy;
         vec4 leftData = v1;
@@ -333,6 +306,7 @@ FindNearestLineBvhV1Result findNearestLineBvhV1(vec2 ro, float maxDist)
                                                              result,
                                                              addToStackDistances.y,
                                                              addToStackIds.y);
+
         // Prioritise nearest
         if(leftAddToStack && rightAddToStack)
         {
@@ -341,22 +315,26 @@ FindNearestLineBvhV1Result findNearestLineBvhV1(vec2 ro, float maxDist)
                 addToStackDistances.xy = addToStackDistances.yx;
                 addToStackIds.xy = addToStackIds.yx;
             }
-        }
 
-        if(leftAddToStack)
-        {
             stack.stack[++stack.index] = addToStackIds.x;
-#if LINE_BVH_V1_RECHECK_DISTANCE
-            stack.stackdist[stack.index] = addToStackDistances.x * addToStackDistances.x;
-#endif // LINE_BVH_V1_RECHECK_DISTANCE
+            head = addToStackIds.y;
         }
-
-        if(rightAddToStack)
+        else if(leftAddToStack)
         {
-            stack.stack[++stack.index] = addToStackIds.y;
-#if LINE_BVH_V1_RECHECK_DISTANCE
-            stack.stackdist[stack.index] = addToStackDistances.y * addToStackDistances.y;
-#endif // LINE_BVH_V1_RECHECK_DISTANCE
+            head = addToStackIds.x;
+
+        }
+        else if(rightAddToStack)
+        {
+            head = addToStackIds.y;
+        }
+        else if(stack.index > 0)
+        {
+            head = stack.stack[stack.index--];
+        }
+        else
+        {
+            done = true;
         }
     }
 
@@ -368,7 +346,6 @@ float findNearestDistanceBvhV1(vec2 ro, float maxDist)
 {
     return sqrt(findNearestLineBvhV1(ro, maxDist).hitDistSq);
 }
-
 
 
 #endif // LINE_BVH_V1_TRACING_GLSLI
