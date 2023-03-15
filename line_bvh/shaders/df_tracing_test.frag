@@ -1,7 +1,9 @@
 #version 460 core
 
-layout(binding=0) uniform sampler2D distanceField;
-layout(location=0)  uniform vec2 targetUV;
+#include "df_tracing.glsli"
+
+
+layout(location=1)  uniform vec2 targetUV;
 layout(location=0) in vec2 uv;
 layout(location=0) out vec4 col;
 
@@ -23,52 +25,12 @@ void main()
     vec2 rd = fromTarget / dist;
 #endif
 
-    int numSamples = 0;
-    bool visible = false;
+    DFTraceResult result = df_trace(ro, rd, dist);
 
-    const int maxSteps = 1024;
-    float bias = 0.5 / 1024.0; // hardcoding for now, should be (0.5 / dim)
-    bias *= 64.0;
-
-
-    // This should probably go up and down the mip chain based upon
-    // the last distance
-
-    int i=0;
-    int mip=6;
-    for(; mip>-1; --mip)
-    {
-        for(; i<maxSteps; ++i)
-        {
-            ++numSamples;
-            float d = textureLod(distanceField, ro, float(mip)).x * 0.95;
-            if(d < bias)
-            {
-                break;
-            }
-
-            ro += rd * d;
-            dist -= d;
-            if(dist <= 0)
-            {
-                visible = true;
-                break;
-            }
-        }
-
-        if(visible)
-        {
-            break;
-        }
-
-        bias *= 0.5;
-
-    }
-
-    float numVisits = float(numSamples) / float(8);
-    float noHit = float(visible);
-    float mipF = float(mip) / 6.0;
-    col = vec4(numVisits, noHit, mipF, 1.);
-    col = vec4(noHit, mipF, mipF, 1);
+    float numVisits = float(result.numSamples) / float(64);
+    float noHit = float(result.visible);
+    float mipF = result.finalMip / 6.0;
+    // col = vec4(numVisits, noHit, mipF, 1.);
+    // col = vec4(noHit, mipF, mipF, 1);
+    col = vec4(noHit, noHit, noHit, 1);
 }
-

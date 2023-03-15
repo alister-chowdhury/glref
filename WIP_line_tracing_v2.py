@@ -306,7 +306,7 @@ class Renderer(object):
 
         # Downscale mips (in practice, this seems to result in more or less the same
         # access pattern as manually retracing it)
-        if True:
+        if False:
             glUseProgram(_DOWNRES_DF_PROGRAM.one())
             for mip in range(1, len(self._df_per_mip_framebuffers)):
                 glTextureParameteri(self._df_texture, GL_TEXTURE_BASE_LEVEL, mip - 1)
@@ -339,7 +339,7 @@ class Renderer(object):
             GL_LINEAR
         )
 
-        if True:
+        if False:
             glUseProgram(_DRAW_V1_TRACE_TEST_PROGRAM.get(
                 VS_OUTPUT_UV=0,
                 LINE_BVH_V1_LOC=0
@@ -351,9 +351,13 @@ class Renderer(object):
         else:
             glUseProgram(_DRAW_DF_TRACE_TEST_PROGRAM.get(
                 VS_OUTPUT_UV=0,
+                DF_TEXTURE_LOC=0,
+                DF_PARAMS_LOC=0
             ))
             glBindTextureUnit(0, self._df_texture)
-            glUniform2f(0, self._test_pos_x, self._test_pos_y)
+            bias = 0.5 / (DF_RESOLUTION >> DF_NUM_MIPS)
+            glUniform2f(0, bias, DF_NUM_MIPS)
+            glUniform2f(1, self._test_pos_x, self._test_pos_y)
             glBindVertexArray(viewport.get_dummy_vao())
             glDrawArrays(GL_TRIANGLES, 0, 3)
 

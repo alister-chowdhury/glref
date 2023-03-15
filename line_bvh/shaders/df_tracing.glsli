@@ -1,0 +1,64 @@
+#ifndef DF_TRACING_GLSLI
+#define DF_TRACING_GLSLI
+
+
+layout(binding=DF_TEXTURE_LOC) uniform sampler2D distanceFieldTexture;
+layout(location=DF_PARAMS_LOC)  uniform vec2 distanceFieldParams; // .x = tail mip bias (0.5 / max(w, h))
+                                                                  // .y = num mips
+
+struct DFTraceResult
+{
+    bool    visible;
+    int     numSamples;
+    float   finalMip;
+};
+
+
+DFTraceResult df_trace(vec2 ro, vec2 rd, float maxDist)
+{
+    const int maxSteps = 128;
+    float mip = distanceFieldParams.y;
+    float bias = distanceFieldParams.x;
+    float dist = maxDist;
+
+    bool visible = false;
+    int i = 0;
+    for(; mip > -0.5; mip -= 1.0)
+    {
+        for(; i < maxSteps; ++i)
+        {
+            float d = textureLod(distanceFieldTexture, ro, mip).x * 0.95;
+            
+            // Move to a lower mip, we require more detail
+            if(d < bias)
+            {
+                break;
+            }
+
+            dist -= d;
+            if(dist <= 0)
+            {
+                visible = true;
+                break;
+            }
+
+            ro += rd * d;
+        }
+
+        if(visible)
+        {
+            break;
+        }
+
+        // Adjust the bias for the new mip level
+        bias *= 0.5;
+    }
+
+    DFTraceResult result;
+    result.visible =  visible;
+    result.numSamples = i;
+    result.finalMip = mip;
+    return result;
+}
+
+#endif // DF_TRACING_GLSLI
