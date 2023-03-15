@@ -1,0 +1,82 @@
+#ifndef CH_COMMON_GLSLI
+#define CH_COMMON_GLSLI
+
+// Circular harmonic stuff (basically spherical haromics minus a dimension)
+
+#include "../../shaders/common.glsl"
+
+#define SH_0 0.282094791773878143474
+#define SH_1 0.4886025119029199215864
+
+// Two-band circular harmonic
+struct CH2
+{
+    vec3 V;
+};
+
+
+CH2 CH2Basis(vec2 N)
+{
+    CH2 result;
+    result.V.x  = SH_0;
+    result.V.yz = N * SH_1;
+    return result;
+}
+
+
+CH2 CH2Add(CH2 A, CH2 B)
+{
+    CH2 result;
+    result.V = A.V + B.V;
+    return result;
+}
+
+CH2 CH2Mul(CH2 A, float C)
+{
+    CH2 result;
+    result.V = A.V * C;
+    return result;
+}
+
+
+float CH2Dot(CH2 A, CH2 B)
+{
+    return dot(A.V, B.V);
+}
+
+
+CH2 CH2DiffuseTransfer(vec2 N)
+{
+    CH2 result;
+    result.V.x  = SH_0 * PI;
+    result.V.yz = N * (SH_1 * 2.0 / 3.0 * PI);
+    return result;
+}
+
+
+// Logic for storing approximations of radiance, which we can happily
+// use to accelerate direct lighting calculations.
+//
+// https://grahamhazel.com/blog/2017/12/22/converting-sh-radiance-to-irradiance/
+
+CH2 CH2LambertianRadianceBasis(vec2 N)
+{
+    CH2 result;
+    result.V.x  = SH_0 * 4.0;
+    result.V.yz = N * (SH_1 * 4.0);
+    return result;
+}
+
+
+float CH2RadianceEval(CH2 RadianceCH, vec2 N)
+{
+    float ratio = length(RadianceCH.V.yz) / RadianceCH.V.x;
+    float q = 0.5 * dot(N, RadianceCH.V.yz) + 0.5;
+    float p = 2.0 * ratio + 1.0;
+    float a = (1.0 - ratio) / (1.0 + ratio);
+    return RadianceCH.V.x * (a + (1.0 - a) * (p + 1.0) * pow(q, p));
+}
+
+
+
+#endif // CH_COMMON_GLSLI

@@ -55,11 +55,31 @@ _DRAW_UNIFORM_PROBE_VISIBILITY = viewport.make_permutation_program(
     GL_FRAGMENT_SHADER = line_bvh.UNIFORM_PROBE_VISIBILITY_FRAG
 )
 
+_DRAW_UNIFORM_PROBE_TRACE_RADIANCE = viewport.make_permutation_program(
+    _DEBUGGING,
+    GL_VERTEX_SHADER = _DRAW_FULL_SCREEN_PATH,
+    GL_FRAGMENT_SHADER = line_bvh.UNIFORM_PROBE_RADIANCE_SAMPLE_FRAG
+)
+
+_DRAW_UNIFORM_PROBE_SPATIAL_FILTER = viewport.make_permutation_program(
+    _DEBUGGING,
+    GL_VERTEX_SHADER = _DRAW_FULL_SCREEN_PATH,
+    GL_FRAGMENT_SHADER = line_bvh.UNIFORM_PROBE_SPATIAL_FILTER_FRAG
+)
+
+_DRAW_UNIFORM_PROBE_INTEGRATE_CH = viewport.make_permutation_program(
+    _DEBUGGING,
+    GL_VERTEX_SHADER = _DRAW_FULL_SCREEN_PATH,
+    GL_FRAGMENT_SHADER = line_bvh.UNIFORM_PROBE_CH_INTEGRATE_FRAG
+)
+
 
 DF_RESOLUTION = 1024
 DF_NUM_MIPS = max(1, int(log2(DF_RESOLUTION)) - int(log2(16)))
 
 PROBE_RESOLUTION = 64
+PROBE_SAMPLE_SIZE = 4
+PROBE_SAMPLE_RESOLUTION = PROBE_RESOLUTION * PROBE_SAMPLE_SIZE
 
 class Renderer(object):
 
@@ -309,10 +329,61 @@ class Renderer(object):
             0
         )
 
+        uniform_probe_trace_radiance_ptr = ctypes.c_int()
+        glCreateTextures(GL_TEXTURE_2D, 1, uniform_probe_trace_radiance_ptr)
+        self._uniform_probe_trace_radiance = uniform_probe_trace_radiance_ptr.value
+        glTextureStorage2D(
+            self._uniform_probe_trace_radiance,
+            1,
+            GL_R11F_G11F_B10F,
+            PROBE_SAMPLE_RESOLUTION,
+            PROBE_SAMPLE_RESOLUTION
+        )
+        glTextureParameteri(self._uniform_probe_trace_radiance, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE)
+        glTextureParameteri(self._uniform_probe_trace_radiance, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE)
+        glTextureParameteri(self._uniform_probe_trace_radiance, GL_TEXTURE_MIN_FILTER, GL_NEAREST)
+        glTextureParameteri(self._uniform_probe_trace_radiance, GL_TEXTURE_MAG_FILTER, GL_NEAREST)
+        self._uniform_probe_trace_radiance_fb = viewport.WrappedFramebuffer().add_col_attachment(
+            self._uniform_probe_trace_radiance,
+            0
+        )
+
+        glCreateTextures(GL_TEXTURE_2D, 1, uniform_probe_trace_radiance_ptr)
+        self._uniform_probe_trace_radiance_swap = uniform_probe_trace_radiance_ptr.value
+        glTextureStorage2D(
+            self._uniform_probe_trace_radiance_swap,
+            1,
+            GL_R11F_G11F_B10F,
+            PROBE_SAMPLE_RESOLUTION,
+            PROBE_SAMPLE_RESOLUTION
+        )
+        glTextureParameteri(self._uniform_probe_trace_radiance_swap, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE)
+        glTextureParameteri(self._uniform_probe_trace_radiance_swap, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE)
+        glTextureParameteri(self._uniform_probe_trace_radiance_swap, GL_TEXTURE_MIN_FILTER, GL_NEAREST)
+        glTextureParameteri(self._uniform_probe_trace_radiance_swap, GL_TEXTURE_MAG_FILTER, GL_NEAREST)
+        self._uniform_probe_trace_radiance_swap_fb = viewport.WrappedFramebuffer().add_col_attachment(
+            self._uniform_probe_trace_radiance_swap,
+            0
+        )
+
+        self._uniform_probe_radiance_ch_0 = viewport.FramebufferTarget(GL_R11F_G11F_B10F, True)
+        self._uniform_probe_radiance_ch_1 = viewport.FramebufferTarget(GL_RGB16F, True)
+        self._uniform_probe_radiance_ch_2 = viewport.FramebufferTarget(GL_RG16F, True)
+        self._uniform_probe_radiance_ch_fb = viewport.Framebuffer(
+            (
+                self._uniform_probe_radiance_ch_0,
+                self._uniform_probe_radiance_ch_1,
+                self._uniform_probe_radiance_ch_2
+            ),
+            PROBE_RESOLUTION,
+            PROBE_RESOLUTION,
+        )
+
 
         glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT)
         self._generate_line_df()
         self._generate_probe_visibility()
+        self._generate_probe_sample_radiance()
 
         glViewport(0, 0, wnd.width, wnd.height)
 
@@ -365,11 +436,67 @@ class Renderer(object):
             glBindVertexArray(viewport.get_dummy_vao())
             glDrawArrays(GL_TRIANGLES, 0, 3)
 
+    def _generate_probe_sample_radiance(self):
+        glDisable(GL_BLEND)
+        glDisable(GL_DEPTH_TEST)
+        glViewport(0, 0, PROBE_SAMPLE_RESOLUTION, PROBE_SAMPLE_RESOLUTION)
+        with self._uniform_probe_trace_radiance_fb.bind():
+            glUseProgram(_DRAW_UNIFORM_PROBE_TRACE_RADIANCE.get(
+                VS_OUTPUT_UV=0,
+                DF_TEXTURE_LOC=0,
+                DF_PARAMS_LOC=0,
+                PROBE_WIDTH=PROBE_SAMPLE_SIZE,
+                PROBE_HEIGHT=PROBE_SAMPLE_SIZE
+            ))
+            glBindTextureUnit(0, self._df_texture)
+            bias = 0.5 / (DF_RESOLUTION >> DF_NUM_MIPS)
+            glUniform2f(0, bias, DF_NUM_MIPS)
+            glUniform4f(
+                1,
+                PROBE_SAMPLE_RESOLUTION,
+                PROBE_SAMPLE_RESOLUTION,
+                1.0/PROBE_SAMPLE_RESOLUTION,
+                1.0/PROBE_SAMPLE_RESOLUTION
+            )
+            glBindVertexArray(viewport.get_dummy_vao())
+            glDrawArrays(GL_TRIANGLES, 0, 3)
+
+
+        # Spatial filtering (adds a bit of a nice fade etc)
+        glUseProgram(_DRAW_UNIFORM_PROBE_SPATIAL_FILTER.get(
+            PROBE_WIDTH=PROBE_SAMPLE_SIZE,
+            PROBE_HEIGHT=PROBE_SAMPLE_SIZE
+        ))
+        glBindTextureUnit(0, self._uniform_probe_visibility)
+        for i in range(2):
+            with self._uniform_probe_trace_radiance_swap_fb.bind():
+                glBindTextureUnit(1, self._uniform_probe_trace_radiance)
+                glDrawArrays(GL_TRIANGLES, 0, 3)
+            with self._uniform_probe_trace_radiance_fb.bind():
+                glBindTextureUnit(1, self._uniform_probe_trace_radiance_swap)
+                glDrawArrays(GL_TRIANGLES, 0, 3)
+
+    def _radiance_probe_ch_integrate(self):
+        glDisable(GL_BLEND)
+        glDisable(GL_DEPTH_TEST)
+        glViewport(0, 0, PROBE_RESOLUTION, PROBE_RESOLUTION)
+        with self._uniform_probe_radiance_ch_fb.bind():
+            glUseProgram(_DRAW_UNIFORM_PROBE_INTEGRATE_CH.get(
+                ACCUMULATE_RADIANCE=True,
+                PROBE_WIDTH=PROBE_SAMPLE_SIZE,
+                PROBE_HEIGHT=PROBE_SAMPLE_SIZE
+            ))
+            glBindTextureUnit(0, self._uniform_probe_trace_radiance)
+            glBindVertexArray(viewport.get_dummy_vao())
+            glDrawArrays(GL_TRIANGLES, 0, 3)
+
 
     def _draw(self, wnd):
         glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT)
         # self._generate_line_df()
         self._generate_probe_visibility()
+        self._generate_probe_sample_radiance()
+        self._radiance_probe_ch_integrate()
 
         glViewport(0, 0, wnd.width, wnd.height)
         glBlitNamedFramebuffer(
