@@ -49,10 +49,16 @@ _DRAW_V1_TRACE_TEST_PROGRAM = viewport.make_permutation_program(
     GL_FRAGMENT_SHADER = line_bvh.V1_TRACING_TEST_FRAG
 )
 
-_DRAW_UNIFORM_PROBE_VISIBILITY = viewport.make_permutation_program(
+_DRAW_UNIFORM_PROBE_NEIGHBOUR_VISIBILITY = viewport.make_permutation_program(
     _DEBUGGING,
     GL_VERTEX_SHADER = _DRAW_FULL_SCREEN_PATH,
-    GL_FRAGMENT_SHADER = line_bvh.UNIFORM_PROBE_VISIBILITY_FRAG
+    GL_FRAGMENT_SHADER = line_bvh.UNIFORM_PROBE_NEIGHBOUR_VISIBILITY_FRAG
+)
+
+_DRAW_UNIFORM_PROBE_VISIBILITY_DISTANCES = viewport.make_permutation_program(
+    _DEBUGGING,
+    GL_VERTEX_SHADER = _DRAW_FULL_SCREEN_PATH,
+    GL_FRAGMENT_SHADER = line_bvh.UNIFORM_PROBE_VISIBILITY_DISTANCES_FRAG
 )
 
 _DRAW_UNIFORM_PROBE_TRACE_RADIANCE = viewport.make_permutation_program(
@@ -76,6 +82,10 @@ _DRAW_UNIFORM_PROBE_INTEGRATE_CH = viewport.make_permutation_program(
 
 DF_RESOLUTION = 1024
 DF_NUM_MIPS = max(1, int(log2(DF_RESOLUTION)) - int(log2(16)))
+
+# USING ONE MIP RUNS FASTER!!!!
+DF_NUM_MIPS = 1
+
 
 PROBE_RESOLUTION = 64
 PROBE_SAMPLE_SIZE = 4
@@ -316,16 +326,35 @@ class Renderer(object):
             line_bvh_data.tobytes()
         )
 
-        uniform_probe_visibility_ptr = ctypes.c_int()
-        glCreateTextures(GL_TEXTURE_2D, 1, uniform_probe_visibility_ptr)
-        self._uniform_probe_visibility = uniform_probe_visibility_ptr.value
-        glTextureStorage2D(self._uniform_probe_visibility, 1, GL_R8UI, PROBE_RESOLUTION, PROBE_RESOLUTION)
-        glTextureParameteri(self._uniform_probe_visibility, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE)
-        glTextureParameteri(self._uniform_probe_visibility, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE)
-        glTextureParameteri(self._uniform_probe_visibility, GL_TEXTURE_MIN_FILTER, GL_NEAREST)
-        glTextureParameteri(self._uniform_probe_visibility, GL_TEXTURE_MAG_FILTER, GL_NEAREST)
-        self._uniform_probe_visibility_fb = viewport.WrappedFramebuffer().add_col_attachment(
-            self._uniform_probe_visibility,
+        uniform_probe_neighbour_visibility_ptr = ctypes.c_int()
+        glCreateTextures(GL_TEXTURE_2D, 1, uniform_probe_neighbour_visibility_ptr)
+        self._uniform_probe_neighbour_visibility = uniform_probe_neighbour_visibility_ptr.value
+        glTextureStorage2D(self._uniform_probe_neighbour_visibility, 1, GL_R8UI, PROBE_RESOLUTION, PROBE_RESOLUTION)
+        glTextureParameteri(self._uniform_probe_neighbour_visibility, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE)
+        glTextureParameteri(self._uniform_probe_neighbour_visibility, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE)
+        glTextureParameteri(self._uniform_probe_neighbour_visibility, GL_TEXTURE_MIN_FILTER, GL_NEAREST)
+        glTextureParameteri(self._uniform_probe_neighbour_visibility, GL_TEXTURE_MAG_FILTER, GL_NEAREST)
+        self._uniform_probe_neighbour_visibility_fb = viewport.WrappedFramebuffer().add_col_attachment(
+            self._uniform_probe_neighbour_visibility,
+            0
+        )
+
+        uniform_probe_vis_distances_ptr = ctypes.c_int()
+        glCreateTextures(GL_TEXTURE_2D, 1, uniform_probe_vis_distances_ptr)
+        self._uniform_probe_vis_distances = uniform_probe_vis_distances_ptr.value
+        glTextureStorage2D(
+            self._uniform_probe_vis_distances,
+            1,
+            GL_RGBA32UI,
+            PROBE_RESOLUTION,
+            PROBE_RESOLUTION
+        )
+        glTextureParameteri(self._uniform_probe_vis_distances, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE)
+        glTextureParameteri(self._uniform_probe_vis_distances, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE)
+        glTextureParameteri(self._uniform_probe_vis_distances, GL_TEXTURE_MIN_FILTER, GL_NEAREST)
+        glTextureParameteri(self._uniform_probe_vis_distances, GL_TEXTURE_MAG_FILTER, GL_NEAREST)
+        self._uniform_probe_vis_distances_fb = viewport.WrappedFramebuffer().add_col_attachment(
+            self._uniform_probe_vis_distances,
             0
         )
 
@@ -382,7 +411,7 @@ class Renderer(object):
 
         glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT)
         self._generate_line_df()
-        self._generate_probe_visibility()
+        self._generate_probe_neighbour_visibility()
         self._generate_probe_sample_radiance()
 
         glViewport(0, 0, wnd.width, wnd.height)
@@ -419,12 +448,12 @@ class Renderer(object):
         glTextureParameteri(self._df_texture, GL_TEXTURE_MAX_LEVEL, len(self._df_per_mip_framebuffers))
 
 
-    def _generate_probe_visibility(self):
+    def _generate_probe_neighbour_visibility(self):
         glDisable(GL_BLEND)
         glDisable(GL_DEPTH_TEST)
         glViewport(0, 0, PROBE_RESOLUTION, PROBE_RESOLUTION)
-        with self._uniform_probe_visibility_fb.bind():
-            glUseProgram(_DRAW_UNIFORM_PROBE_VISIBILITY.get(
+        with self._uniform_probe_neighbour_visibility_fb.bind():
+            glUseProgram(_DRAW_UNIFORM_PROBE_NEIGHBOUR_VISIBILITY.get(
                 VS_OUTPUT_UV=0,
                 DF_TEXTURE_LOC=0,
                 DF_PARAMS_LOC=0
@@ -433,6 +462,22 @@ class Renderer(object):
             bias = 0.5 / (DF_RESOLUTION >> DF_NUM_MIPS)
             glUniform2f(0, bias, DF_NUM_MIPS)
             glUniform2f(1, 1.0/PROBE_RESOLUTION, 1.0/PROBE_RESOLUTION)
+            glBindVertexArray(viewport.get_dummy_vao())
+            glDrawArrays(GL_TRIANGLES, 0, 3)
+
+    def _generate_probe_visibility_distances(self):
+        glDisable(GL_BLEND)
+        glDisable(GL_DEPTH_TEST)
+        glViewport(0, 0, PROBE_RESOLUTION, PROBE_RESOLUTION)
+        with self._uniform_probe_vis_distances_fb.bind():
+            glUseProgram(_DRAW_UNIFORM_PROBE_VISIBILITY_DISTANCES.get(
+                VS_OUTPUT_UV=0,
+                DF_TEXTURE_LOC=0,
+                DF_PARAMS_LOC=0
+            ))
+            glBindTextureUnit(0, self._df_texture)
+            bias = 0.5 / (DF_RESOLUTION >> DF_NUM_MIPS)
+            glUniform2f(0, bias, DF_NUM_MIPS)
             glBindVertexArray(viewport.get_dummy_vao())
             glDrawArrays(GL_TRIANGLES, 0, 3)
 
@@ -467,7 +512,7 @@ class Renderer(object):
             PROBE_WIDTH=PROBE_SAMPLE_SIZE,
             PROBE_HEIGHT=PROBE_SAMPLE_SIZE
         ))
-        glBindTextureUnit(0, self._uniform_probe_visibility)
+        glBindTextureUnit(0, self._uniform_probe_neighbour_visibility)
         for i in range(2):
             with self._uniform_probe_trace_radiance_swap_fb.bind():
                 glBindTextureUnit(1, self._uniform_probe_trace_radiance)
@@ -494,7 +539,8 @@ class Renderer(object):
     def _draw(self, wnd):
         glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT)
         # self._generate_line_df()
-        self._generate_probe_visibility()
+        self._generate_probe_neighbour_visibility()
+        self._generate_probe_visibility_distances()
         self._generate_probe_sample_radiance()
         self._radiance_probe_ch_integrate()
 
@@ -511,7 +557,7 @@ class Renderer(object):
         if False:
             glUseProgram(_DRAW_V1_TRACE_TEST_PROGRAM.get(
                 VS_OUTPUT_UV=0,
-                LINE_BVH_V1_LOC=0
+                LINE_BVH_V1_LOC=0,
             ))
             glBindTextureUnit(0, self._line_bvh_texture)
             glUniform2f(0, self._test_pos_x, self._test_pos_y)

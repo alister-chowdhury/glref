@@ -65,6 +65,18 @@ void main()
         }
     }
 
+    {
+        vec2 pointLightPos = vec2(0.4883, 0.6133);
+        vec3 lightIntensity = vec3(0.3, 0.1, 0.7);
+        vec2 toLight = pointLightPos - uv;
+        float toLightDist = length(toLight);
+        toLight /= toLightDist;
+        if(df_trace(probeUV, toLight, toLightDist).visible)
+        {
+            radiance += max(0.0, -dot(toLight, probeDir)) * lightIntensity * 1.0 / (100.0 * toLightDist * toLightDist + 1.0);
+        }
+    }
+
 
     {
         vec2 pointLightPos = vec2(0.2598, 0.8418);

@@ -22,7 +22,8 @@ DF_GENERATION_FRAG = os.path.join(_SHADER_DIR, "df_generation.frag")
 DF_TRACING_TEST_FRAG = os.path.join(_SHADER_DIR, "df_tracing_test.frag")
 
 
-UNIFORM_PROBE_VISIBILITY_FRAG = os.path.join(_SHADER_DIR, "uniform_probe_visibility_df.frag")
+UNIFORM_PROBE_NEIGHBOUR_VISIBILITY_FRAG = os.path.join(_SHADER_DIR, "uniform_probe_neighbour_visibility_df.frag")
+UNIFORM_PROBE_VISIBILITY_DISTANCES_FRAG = os.path.join(_SHADER_DIR, "uniform_probe_visibility_distances.frag")
 UNIFORM_PROBE_RADIANCE_SAMPLE_FRAG = os.path.join(_SHADER_DIR, "uniform_probe_radiance_sample.frag")
 UNIFORM_PROBE_SPATIAL_FILTER_FRAG = os.path.join(_SHADER_DIR, "uniform_probe_spatial_filter.frag")
 UNIFORM_PROBE_CH_INTEGRATE_FRAG = os.path.join(_SHADER_DIR, "uniform_probe_ch_integrate.frag")

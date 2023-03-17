@@ -11,6 +11,7 @@ struct DFTraceResult
     bool    visible;
     int     numSamples;
     float   finalMip;
+    float   finalDist;
 };
 
 
@@ -58,6 +59,7 @@ DFTraceResult df_trace(vec2 ro, vec2 rd, float maxDist)
     result.visible =  visible;
     result.numSamples = i;
     result.finalMip = mip;
+    result.finalDist = maxDist - dist;
     return result;
 }
 

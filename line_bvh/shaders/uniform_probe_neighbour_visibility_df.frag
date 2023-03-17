@@ -8,6 +8,8 @@ layout(location=0) in vec2 uv;
 layout(location=0) out uint outVisMask;
 
 
+// Calculates visibility between neighbouring probes
+
 void main()
 {
 

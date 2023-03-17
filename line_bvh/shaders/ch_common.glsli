@@ -45,6 +45,27 @@ float CH2Dot(CH2 A, CH2 B)
 }
 
 
+CH2 CH2DirectLightRadiance(vec2 N)
+{
+    CH2 result;
+    result.V.x = SH_0 * (1.0 + 1.0 / 3.0);
+    result.V.yz = N * SH_1;
+    return result;
+}
+
+
+// E controls the ambient term
+// 0 = Low ambient
+// 1 = Normal ambient
+CH2 CH2DirectLightRadianceExp(vec2 N, float E)
+{
+    CH2 result;
+    result.V.x = SH_0 * (1.0 + E / 3.0);
+    result.V.yz = N * SH_1 * (1.0 + (1.0 - E) / 3.0);
+    return result;
+}
+
+
 CH2 CH2DiffuseTransfer(vec2 N)
 {
     CH2 result;
