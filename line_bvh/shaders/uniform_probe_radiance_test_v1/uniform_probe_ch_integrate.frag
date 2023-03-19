@@ -1,7 +1,7 @@
 #version 460 core
 
-#include "../../shaders/common.glsl"
-#include "ch_common.glsli"
+#include "../../../shaders/common.glsl"
+#include "../ch_common.glsli"
 
 
 #ifndef PROBE_WIDTH

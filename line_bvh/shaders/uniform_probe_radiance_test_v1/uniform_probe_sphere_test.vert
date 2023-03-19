@@ -1,6 +1,6 @@
 #version 460 core
 
-#include "../../shaders/common.glsl"
+#include "../../../shaders/common.glsl"
 
 
 layout(location=0) out vec2 uv;

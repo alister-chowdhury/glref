@@ -1,6 +1,6 @@
 #version 460 core
 
-#include "df_tracing.glsli"
+#include "../df_tracing.glsli"
 
 
 layout(location=1)  uniform vec2 invProbeTextureSize; 

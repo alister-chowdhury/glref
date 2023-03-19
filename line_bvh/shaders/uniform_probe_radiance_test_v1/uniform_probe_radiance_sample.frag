@@ -1,7 +1,7 @@
 #version 460 core
 
-#include "../../shaders/common.glsl"
-#include "df_tracing.glsli"
+#include "../../../shaders/common.glsl"
+#include "../df_tracing.glsli"
 
 
 #ifndef PROBE_WIDTH

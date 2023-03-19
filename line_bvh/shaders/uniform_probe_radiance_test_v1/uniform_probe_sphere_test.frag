@@ -1,8 +1,8 @@
 #version 460 core
 
-#include "../../shaders/common.glsl"
-#include "df_tracing.glsli"
-#include "ch_common.glsli"
+#include "../../../shaders/common.glsl"
+#include "../df_tracing.glsli"
+#include "../ch_common.glsli"
 
 
 layout(location=0) in vec2 uv;
@@ -89,6 +89,13 @@ void main()
         ) * 10.0;
 #elif 1
         CH2 evalBasis = CH2Basis(-shNormal);
+        value = vec3(
+            max(0., dot(CHR.V, evalBasis.V)),
+            max(0., dot(CHG.V, evalBasis.V)),
+            max(0., dot(CHB.V, evalBasis.V))
+        ) * 10.0;
+#elif 1
+        CH2 evalBasis = CH2DiffuseTransfer(-shNormal);
         value = vec3(
             max(0., dot(CHR.V, evalBasis.V)),
             max(0., dot(CHG.V, evalBasis.V)),

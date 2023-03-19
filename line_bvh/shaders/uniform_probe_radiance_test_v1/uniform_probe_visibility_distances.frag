@@ -1,6 +1,6 @@
 #version 460 core
 
-#include "../../shaders/common.glsl"
+#include "../../../shaders/common.glsl"
 
 #ifndef TRACE_METHOD
 #define TRACE_METHOD 0
@@ -8,9 +8,9 @@
 
 
 #if TRACE_METHOD == 0
-#include "df_tracing.glsli"
+#include "../df_tracing.glsli"
 #else // TRACE_METHOD == 1
-#include "v1_tracing.glsli"
+#include "../v1_tracing.glsli"
 #endif // TRACE_METHOD
 
 layout(location=0) in vec2 uv;

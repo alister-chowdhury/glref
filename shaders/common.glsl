@@ -10,6 +10,11 @@
 #define INVSQRT2    0.7071067811865475244008443621048490392848359377
 
 
+float multiplySign(float x, float y)
+{
+    return uintBitsToFloat(floatBitsToUint(x) ^ (floatBitsToUint(y) & 0x80000000u));
+}
+
 
 // https://math.stackexchange.com/a/1105038
 float fastAtan2(float y, float x)
@@ -19,7 +24,7 @@ float fastAtan2(float y, float x)
     float r = ((-0.0464964749 * s + 0.15931422) * s - 0.327622764) * s * a + a;
     if(abs(y) > abs(x)) { r = HALFPI - r; }
     if(x < 0) { r = PI - r; }
-    if(y < 0) { r = -r; }
+    r = multiplySign(r, y); // if(y < 0) { r = -r; }
     return r;
 }
 
