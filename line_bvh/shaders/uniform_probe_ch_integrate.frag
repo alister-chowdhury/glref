@@ -15,9 +15,9 @@
 
 layout(binding=0) uniform sampler2D sceneSamples;
 
-layout(location=0) out vec3  OutRGBSH0;
-layout(location=1) out vec4  OutRGBSH1;
-layout(location=2) out vec2  OutRGBSH2;
+layout(location=0) out vec3  outRGBSH0;
+layout(location=1) out vec4  outRGBSH1;
+layout(location=2) out vec2  outRGBSH2;
 
 
 void main()
@@ -52,7 +52,7 @@ void main()
         accumB = CH2Add(accumB, CH2Mul(probeBasis, sampled.z));
     }
 
-    OutRGBSH0 = vec3(accumR.V.x, accumG.V.x, accumB.V.x);
-    OutRGBSH1 = vec4(accumR.V.yz, accumG.V.yz);
-    OutRGBSH2 = accumB.V.yz;
+    outRGBSH0 = vec3(accumR.V.x, accumG.V.x, accumB.V.x);
+    outRGBSH1 = vec4(accumR.V.yz, accumG.V.yz);
+    outRGBSH2 = accumB.V.yz;
 }

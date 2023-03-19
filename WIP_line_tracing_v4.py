@@ -86,6 +86,12 @@ _DRAW_UNIFORM_PROBE_INDIRECT_DIFFUSE_SAMPLE_RADIANCE = viewport.make_permutation
     GL_FRAGMENT_SHADER = line_bvh.UNIFORM_PROBE_INDIRECT_DIFFUSE_SAMPLE_RADIANCE_FRAG
 )
 
+_DRAW_UNIFORM_PROBE_SPHERE_TEST = viewport.make_permutation_program(
+    _DEBUGGING,
+    GL_VERTEX_SHADER = line_bvh.UNIFORM_PROBE_SPHERE_TEST_VERT,
+    GL_FRAGMENT_SHADER = line_bvh.UNIFORM_PROBE_SPHERE_TEST_FRAG
+)
+
 DF_RESOLUTION = 1024
 DF_NUM_MIPS = max(1, int(log2(DF_RESOLUTION)) - int(log2(16)))
 
@@ -606,7 +612,7 @@ class Renderer(object):
             glUniform2f(0, self._test_pos_x, self._test_pos_y)
             glBindVertexArray(viewport.get_dummy_vao())
             glDrawArrays(GL_TRIANGLES, 0, 3)
-        else:
+        elif False:
             glUseProgram(_DRAW_DF_TRACE_TEST_PROGRAM.get(
                 VS_OUTPUT_UV=0,
                 DF_TEXTURE_LOC=0,
@@ -618,6 +624,27 @@ class Renderer(object):
             glUniform2f(1, self._test_pos_x, self._test_pos_y)
             glBindVertexArray(viewport.get_dummy_vao())
             glDrawArrays(GL_TRIANGLES, 0, 3)
+        else:
+            glUseProgram(_DRAW_UNIFORM_PROBE_SPHERE_TEST.get(
+                DF_TEXTURE_LOC=0,
+                DF_PARAMS_LOC=0
+            ))
+            glBindTextureUnit(0, self._df_texture)
+            bias = 0.5 / (DF_RESOLUTION >> DF_NUM_MIPS)
+            glUniform2f(0, bias, DF_NUM_MIPS)
+            glUniform4f(
+                1,
+                PROBE_RESOLUTION,
+                PROBE_RESOLUTION,
+                1.0/PROBE_RESOLUTION,
+                1.0/PROBE_RESOLUTION
+            )
+            glUniform3f(2, self._test_pos_x, self._test_pos_y, 0.1)
+            glBindTextureUnit(1, self._uniform_probe_radiance_ch_0.texture)
+            glBindTextureUnit(2, self._uniform_probe_radiance_ch_1.texture)
+            glBindTextureUnit(3, self._uniform_probe_radiance_ch_2.texture)
+            glBindVertexArray(viewport.get_dummy_vao())
+            glDrawArrays(GL_TRIANGLES, 0, 6)
 
 
         glUseProgram(_DRAW_V1_LINE_BVH_PROGRAM.get(ONLY_LINES=1))

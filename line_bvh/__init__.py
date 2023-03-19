@@ -27,3 +27,8 @@ UNIFORM_PROBE_VISIBILITY_DISTANCES_FRAG = os.path.join(_SHADER_DIR, "uniform_pro
 UNIFORM_PROBE_RADIANCE_SAMPLE_FRAG = os.path.join(_SHADER_DIR, "uniform_probe_radiance_sample.frag")
 UNIFORM_PROBE_SPATIAL_FILTER_FRAG = os.path.join(_SHADER_DIR, "uniform_probe_spatial_filter.frag")
 UNIFORM_PROBE_CH_INTEGRATE_FRAG = os.path.join(_SHADER_DIR, "uniform_probe_ch_integrate.frag")
+UNIFORM_PROBE_INDIRECT_DIFFUSE_SAMPLE_RADIANCE_FRAG = os.path.join(_SHADER_DIR, "uniform_probe_indirect_diffuse_sample_radiance.frag")
+
+
+UNIFORM_PROBE_SPHERE_TEST_VERT = os.path.join(_SHADER_DIR, "uniform_probe_sphere_test.vert")
+UNIFORM_PROBE_SPHERE_TEST_FRAG = os.path.join(_SHADER_DIR, "uniform_probe_sphere_test.frag")
