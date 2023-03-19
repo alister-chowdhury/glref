@@ -25,7 +25,10 @@ void main()
 
     for(int bitIndex=0; bitIndex<8; ++bitIndex)
     {
+
+#if !NO_BLOCKING
         if((visibilityBits & (1u << bitIndex)) != 0)
+#endif // NO_BLOCKING
         {
             int adjustedOffset = (bitIndex >= 4) ? (bitIndex + 1) : bitIndex;
             int y = (adjustedOffset / 3) - 1;

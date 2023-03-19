@@ -539,9 +539,13 @@ class Renderer(object):
 
 
         # Spatial filtering (adds a bit of a nice fade etc)
+        # stupid hack: to stop streaks from being visible near
+        #              edges, we introduce a tiny bit of bleeding
+        #              before filtering with visibility
         glUseProgram(_DRAW_UNIFORM_PROBE_SPATIAL_FILTER.get(
             PROBE_WIDTH=PROBE_SAMPLE_SIZE,
-            PROBE_HEIGHT=PROBE_SAMPLE_SIZE
+            PROBE_HEIGHT=PROBE_SAMPLE_SIZE,
+            NO_BLOCKING=0
         ))
         glBindTextureUnit(0, self._uniform_probe_neighbour_visibility)
         for i in range(2):
@@ -551,6 +555,11 @@ class Renderer(object):
             with self._uniform_probe_trace_radiance_fb.bind():
                 glBindTextureUnit(1, self._uniform_probe_trace_radiance_swap)
                 glDrawArrays(GL_TRIANGLES, 0, 3)
+            glUseProgram(_DRAW_UNIFORM_PROBE_SPATIAL_FILTER.get(
+                PROBE_WIDTH=PROBE_SAMPLE_SIZE,
+                PROBE_HEIGHT=PROBE_SAMPLE_SIZE,
+                NO_BLOCKING=1
+            ))
 
     def _radiance_probe_ch_integrate(self):
         glDisable(GL_BLEND)
