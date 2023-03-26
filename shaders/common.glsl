@@ -29,6 +29,38 @@ float fastAtan2(float y, float x)
 }
 
 
+// Similar to fastAtan2, except the result is pre divided by 2pi, for the
+// purpose of sampling 1d circular maps (circular shadows etc).
+// https://www.geogebra.org/calculator/dms6kp8w
+//
+// max error ~ 0.00024531353567275316
+float fastAtan2_div2pi(float y, float x)
+{
+    float a = min(abs(x), abs(y)) / max(abs(x), abs(y));
+    float s = a * a;
+    float r = ((0.013506162438972577 * s + -0.04684240210645093) * s + -0.8414151531876038) * a + a;
+    if(abs(y) > abs(x)) { r = 0.25 - r; }
+    if(x < 0.0) { r = 0.5 - r; }
+    r = multiplySign(r, y); // if(y < 0) { r = -r; }
+    return r;
+}
+
+
+// One extra mad over fastAtan2_div2pi, although that is typically accurate enough.
+//
+// max error ~ 3.6957397769599165e-05
+float fastAtan2_div2pi_accurate(float y, float x)
+{
+    float a = min(abs(x), abs(y)) / max(abs(x), abs(y));
+    float s = a * a;
+    float r = (((-0.0066609612639593 * s + 0.023972538405749075) * s + -0.05140823187987065) * s + -0.8409411267732256) * a + a;
+    if(abs(y) > abs(x)) { r = 0.25 - r; }
+    if(x < 0.0) { r = 0.5 - r; }
+    r = multiplySign(r, y); // if(y < 0) { r = -r; }
+    return r;
+}
+
+
 int triangleToQuadVertexIdCW(int vertexId)
 {
     // 0---1
