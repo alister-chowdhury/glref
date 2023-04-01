@@ -31,10 +31,9 @@ void main()
         w = dot(N, hit.line.xy - ro);
         // Ensure a consistent clockwise orientation plus
         // keep the distance coef positive.
-        // N.x = multiplySign(N.x, w);
-        // N.y = multiplySign(N.y, w);
-        // // w = multiplySign(w, w);
-        // w = dot(N, hit.line.xy - ro);
+        N.x = multiplySign(N.x, w);
+        N.y = multiplySign(N.y, w);
+        w = multiplySign(w, w);
     }
 
     // R10G10B10A2 encoding, A2 is currently unused...

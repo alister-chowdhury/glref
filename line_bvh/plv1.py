@@ -7,6 +7,11 @@ _SHADER_DIR = os.path.abspath(
 
 
 GEN_PLANE_MAP_FRAG = os.path.join(_SHADER_DIR, "gen_plane_map.frag")
+GEN_BBOX_FROM_PLANE_MAP_FRAG = os.path.join(_SHADER_DIR, "gen_bbox_from_plane_map.frag")
+DRAW_BBOX_VERT = os.path.join(_SHADER_DIR, "draw_bbox.vert")
+DRAW_BBOX_FRAG = os.path.join(_SHADER_DIR, "draw_bbox.frag")
+
+DRAW_LIGHTS_VERT = os.path.join(_SHADER_DIR, "draw_lights.vert")
 DRAW_LIGHTS_FRAG = os.path.join(_SHADER_DIR, "draw_lights.frag")
 DRAW_LIGHTS_FULLSCREEN_VERT = os.path.join(_SHADER_DIR, "draw_lights_fullscreen.vert")
 

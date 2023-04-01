@@ -16,6 +16,14 @@ float multiplySign(float x, float y)
 }
 
 
+// y = 1/x
+// Only works if x is a power of 2
+// if x = 0, result it 1.70141183E+38
+float rcpForPowersOf2(float x)
+{
+    return uintBitsToFloat(0x7f000000u - floatBitsToUint(x));
+}
+
 // https://math.stackexchange.com/a/1105038
 float fastAtan2(float y, float x)
 {

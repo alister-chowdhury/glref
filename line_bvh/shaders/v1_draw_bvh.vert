@@ -2,6 +2,10 @@
 
 // dispatch GL_LINES, 16 * numNodes
 
+#define LINE_BVH_V1_LOC 0
+#include "v1_tracing.glsli"
+
+
 #ifndef ONLY_LINES
 #define ONLY_LINES 0
 #endif
@@ -11,7 +15,6 @@
 #endif
 
 
-layout(binding=0) uniform sampler1D linesBvh;
 layout(location=0) out vec3 col;
 
 uint wang_hash(uint seed)
@@ -47,10 +50,10 @@ void main()
     int sideIndex = index & 1; index /= 2;
     int entryIndex = index;
 
-    vec4 metadata = texelFetch(linesBvh, entryIndex * 3, 0);
-    vec4 data = texelFetch(linesBvh, entryIndex * 3 + 1 + sideIndex, 0);
+    vec4 metadata = texelFetch(v1LinesBvh, entryIndex * 3, 0);
+    vec4 data = texelFetch(v1LinesBvh, entryIndex * 3 + 1 + sideIndex, 0);
 
-    bool isBbox = floatBitsToInt(sideIndex == 0 ? metadata.x : metadata.z) == 0;
+    bool isBbox = floatBitsToInt(sideIndex == 0 ? metadata.x : metadata.z) == LINE_BVH_V1_BBOX_TYPE;
     vec2 uv = vec2(0);
 
     if(!isBbox)

@@ -14,9 +14,6 @@ layout(location=0) in vec2 localUv;
 flat layout(location=1) in float linemapV;
 flat layout(location=2) in vec4 colourAndDecayRate;
 
-
-// layout(location=1) uniform int X0;
-
 #if OUTPUT_CIRCULAR_HARMONICS
 
 layout(location=0) out vec3  outRGBSH0;
@@ -30,20 +27,76 @@ layout(location=0) out vec4 outCol;
 #endif // OUTPUT_CIRCULAR_HARMONICS
 
 
+#define PLANE_BLOCKING_MODE_SMOOTH_LINEAR       0
+#define PLANE_BLOCKING_MODE_BINARY_LINEAR       1
+#define PLANE_BLOCKING_MODE_BINARY_TWOTAP       2
+#define PLANE_BLOCKING_MODE_BINARY_TWOTAP_PCF   3
+
+#ifndef PLANE_BLOCKING_MODE
+#define PLANE_BLOCKING_MODE PLANE_BLOCKING_MODE_BINARY_TWOTAP_PCF
+#endif // PLANE_BLOCKING_MODE
+
+
 void main()
 {
     float dist = length(localUv);
     vec3 evaluatedColour = evaluatePointLightContrib(dist, colourAndDecayRate.xyz, colourAndDecayRate.w);
 
-    // Apply shadowing via the plane map.
     vec2 planeUV = vec2(getPlaneMapSampleU(localUv, vec2(0)), linemapV);
+
+    // Apply shadowing via the plane map.
+#if (PLANE_BLOCKING_MODE == PLANE_BLOCKING_MODE_SMOOTH_LINEAR) || (PLANE_BLOCKING_MODE == PLANE_BLOCKING_MODE_BINARY_LINEAR)
+
     vec3 planeAndDistance = texture(lightPlaneMap, planeUV).xyz;
-    // planeAndDistance = texelFetch(lightPlaneMap, ivec2(X0 & 511, 0), 0).xyz;
-    // vec2 RD = 
-
-
     planeAndDistance.xy = planeAndDistance.xy * 2.0 - 1.0;
+   
+#   if PLANE_BLOCKING_MODE == PLANE_BLOCKING_MODE_SMOOTH_LINEAR 
+
+    // Artefacts at plane transitions (which is what it is attempting to avoid)
     evaluatedColour *= getSmoothPlaneVisibility(localUv, planeAndDistance);
+
+
+#   else // PLANE_BLOCKING_MODE == PLANE_BLOCKING_MODE_BINARY_LINEAR
+    
+    // Sometimes has horribly blobbing artefacts 
+    evaluatedColour *= getBinaryPlaneVisibility(localUv, planeAndDistance);
+
+#   endif // PLANE_BLOCKING_MODE
+
+#else // PLANE_BLOCKING_MODE == PLANE_BLOCKING_MODE_BINARY_TWOTAP || PLANE_BLOCKING_MODE == PLANE_BLOCKING_MODE_BINARY_TWOTAP_PCF
+
+    // Two taps and two binary plane tests, texture width is assumed to be a power of 2,
+    // more expensive, but generally just looks better.
+    
+    planeUV.x = fract(planeUV.x);
+
+    ivec2 mapSize = textureSize(lightPlaneMap, 0);
+    float sampleXBase = planeUV.x * mapSize.x - 0.5;
+    int sampleY = int(planeUV.y * mapSize.y);
+    int sampleX0 = int(sampleXBase);
+    int sampleX1 = sampleX0 + 1;
+    sampleX0 &= (mapSize.x - 1);
+    sampleX1 &= (mapSize.x - 1);
+    vec3 planeAndDistance0 = texelFetch(lightPlaneMap, ivec2(sampleX0, sampleY), 0).xyz;
+    vec3 planeAndDistance1 = texelFetch(lightPlaneMap, ivec2(sampleX1, sampleY), 0).xyz;
+    planeAndDistance0.xy = planeAndDistance0.xy * 2.0 - 1.0;
+    planeAndDistance1.xy = planeAndDistance1.xy * 2.0 - 1.0;
+
+    float visbility0 = getBinaryPlaneVisibility(localUv, planeAndDistance0);
+    float visbility1 = getBinaryPlaneVisibility(localUv, planeAndDistance1);
+
+#if PLANE_BLOCKING_MODE == PLANE_BLOCKING_MODE_BINARY_TWOTAP_PCF
+    float lerpWeight = fract(sampleXBase);
+          lerpWeight = smoothstep(0, 1, lerpWeight);
+    float visbility = mix(visbility0, visbility1, lerpWeight);
+#else // PLANE_BLOCKING_MODE == PLANE_BLOCKING_MODE_BINARY_TWOTAP_PCF
+    float visbility = visbility0 * visbility1;
+#endif // PLANE_BLOCKING_MODE == PLANE_BLOCKING_MODE_BINARY_TWOTAP_PCF
+
+    evaluatedColour *= visbility;
+
+#endif // PLANE_BLOCKING_MODE
+
 
 #if OUTPUT_CIRCULAR_HARMONICS
 

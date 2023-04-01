@@ -158,7 +158,7 @@ layout(location = 0)        out vec4 outCol;
 void main()
 {
     uint signedValue = sampleEncodedNumber(encodedNumber, uv);
-    outCol = (signedValue == 0) ? vec4(0.2, 0.2, 0.2, 0.0) : fgCol;
+    outCol = (signedValue == 0) ? vec4(0.2, 0.2, 0.2, 1.0) : fgCol;
 }
 
 

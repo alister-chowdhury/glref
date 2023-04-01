@@ -1,6 +1,7 @@
 
 import os
 from math import cos, sin, pi, log2
+import random
 
 import numpy
 
@@ -9,6 +10,7 @@ from OpenGL.GL import *
 import viewport
 import line_bvh
 import line_bvh.plv1
+import perf_overlay_lib
 
 _DEBUGGING = False
 
@@ -26,10 +28,29 @@ _GEN_PLANE_MAPS_FULL_PROGRAM = viewport.make_permutation_program(
     GL_FRAGMENT_SHADER = line_bvh.plv1.GEN_PLANE_MAP_FRAG
 )
 
+_GEN_BBOX_FROM_PLANE_MAP_FULL_PROGRAM = viewport.make_permutation_program(
+    _DEBUGGING,
+    GL_VERTEX_SHADER = _DRAW_FULL_SCREEN_PATH,
+    GL_FRAGMENT_SHADER = line_bvh.plv1.GEN_BBOX_FROM_PLANE_MAP_FRAG
+)
+
+
+_DRAW_POINTLIGHT_BBOXES_PROGRAM = viewport.make_permutation_program(
+    _DEBUGGING,
+    GL_VERTEX_SHADER = line_bvh.plv1.DRAW_BBOX_VERT,
+    GL_FRAGMENT_SHADER = line_bvh.plv1.DRAW_BBOX_FRAG
+)
+
 _DRAW_V1_LINE_BVH_PROGRAM = viewport.make_permutation_program(
     _DEBUGGING,
     GL_VERTEX_SHADER = line_bvh.V1_DRAW_BVH_VERT,
     GL_FRAGMENT_SHADER = line_bvh.V1_DRAW_BVH_FRAG
+)
+
+_DRAW_LIGHTS_PROGRAM = viewport.make_permutation_program(
+    _DEBUGGING,
+    GL_VERTEX_SHADER = line_bvh.plv1.DRAW_LIGHTS_VERT,
+    GL_FRAGMENT_SHADER = line_bvh.plv1.DRAW_LIGHTS_FRAG
 )
 
 _DRAW_LIGHTS_FULLSCREEN_PROGRAM = viewport.make_permutation_program(
@@ -38,7 +59,7 @@ _DRAW_LIGHTS_FULLSCREEN_PROGRAM = viewport.make_permutation_program(
     GL_FRAGMENT_SHADER = line_bvh.plv1.DRAW_LIGHTS_FRAG
 )
 
-LINE_PLANEMAP_RESOLUTION = 512
+LINE_PLANEMAP_RESOLUTION = 64
 
 class Renderer(object):
 
@@ -53,8 +74,12 @@ class Renderer(object):
         self.window.on_drag = self._drag
         self.window.on_keypress = self._keypress
 
+        self._fullscreen_draw_lights = 0
+        self._draw_pl_bbox = 0
         self._test_pos_x = 0.5
         self._test_pos_y = 0.5
+
+        self.timer_overlay = perf_overlay_lib.TimerSamples256Overlay()
 
 
     def run(self):
@@ -242,21 +267,32 @@ class Renderer(object):
 
         lights = [
             line_bvh.plv1.PointLightData(
-                (0.25, 0.5),
-                1.0,
+                (0.125, 0.5),
+                10.0,
                 (1.0, 0.0, 0.0)
             ),
-            # line_bvh.plv1.PointLightData(
-            #     (0.5, 0.75),
-            #     1.0,
-            #     (0.0, 1.0, 0.0)
-            # ),
-            # line_bvh.plv1.PointLightData(
-            #     (0.75, 0.5),
-            #     1.0,
-            #     (0.0, 0.0, 1.0)
-            # ),
+            line_bvh.plv1.PointLightData(
+                (0.4, 0.75),
+                10.0,
+                (0.0, 1.0, 0.0)
+            ),
+            line_bvh.plv1.PointLightData(
+                (0.65, 0.5),
+                10.0,
+                (0.0, 0.0, 1.0)
+            ),
         ]
+
+
+        # 100 random lights
+        # lights = [
+        #     line_bvh.plv1.PointLightData(
+        #         (random.random() * 0.5 + 0.25, random.random() * 0.5 + 0.25),
+        #         1.0 + random.random(),
+        #         (random.random() * 0.1, random.random() * 0.1, random.random() * 0.1)
+        #     )
+        #     for _ in range(100)
+        # ]
 
         self._num_lights = len(lights)
 
@@ -281,16 +317,30 @@ class Renderer(object):
         glTextureStorage2D(
             self._light_planemap,
             1,
-            GL_RGBA32F,
+            GL_RGB10_A2,
             LINE_PLANEMAP_RESOLUTION,
             self._num_lights
         )
         glTextureParameteri(self._light_planemap, GL_TEXTURE_WRAP_S, GL_REPEAT)
         glTextureParameteri(self._light_planemap, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE)
-        glTextureParameteri(self._light_planemap, GL_TEXTURE_MIN_FILTER, GL_LINEAR)
-        glTextureParameteri(self._light_planemap, GL_TEXTURE_MAG_FILTER, GL_LINEAR)
+        # glTextureParameteri(self._light_planemap, GL_TEXTURE_MIN_FILTER, GL_LINEAR)
+        # glTextureParameteri(self._light_planemap, GL_TEXTURE_MAG_FILTER, GL_LINEAR)
+        glTextureParameteri(self._light_planemap, GL_TEXTURE_MIN_FILTER, GL_NEAREST)
+        glTextureParameteri(self._light_planemap, GL_TEXTURE_MAG_FILTER, GL_NEAREST)
         self._light_planemap_fb = viewport.WrappedFramebuffer().add_col_attachment(
             self._light_planemap,
+            0
+        )
+
+        light_bbox_texture_ptr = ctypes.c_int()
+        glCreateTextures(GL_TEXTURE_1D, 1, light_bbox_texture_ptr)
+        self._light_bbox_texture = light_bbox_texture_ptr.value
+        glTextureStorage1D(self._light_bbox_texture, 1, GL_RGBA16F, self._num_lights)
+        glTextureParameteri(self._light_bbox_texture, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE)
+        glTextureParameteri(self._light_bbox_texture, GL_TEXTURE_MIN_FILTER, GL_NEAREST)
+        glTextureParameteri(self._light_bbox_texture, GL_TEXTURE_MAG_FILTER, GL_NEAREST)
+        self._light_bbox_fb = viewport.WrappedFramebuffer().add_col_attachment(
+            self._light_bbox_texture,
             0
         )
 
@@ -299,6 +349,8 @@ class Renderer(object):
     def _generate_plane_maps_full(self):
         glDisable(GL_BLEND)
         glDisable(GL_DEPTH_TEST)
+        
+        # Generate actual plane data
         glViewport(0, 0, LINE_PLANEMAP_RESOLUTION, self._num_lights)
         with self._light_planemap_fb.bind():
             glUseProgram(_GEN_PLANE_MAPS_FULL_PROGRAM.get(
@@ -311,6 +363,17 @@ class Renderer(object):
             glBindVertexArray(viewport.get_dummy_vao())
             glDrawArrays(GL_TRIANGLES, 0, 3)
 
+        # Generate BBOX
+        glViewport(0, 0, self._num_lights, 1)
+        with self._light_bbox_fb.bind():
+            glUseProgram(_GEN_BBOX_FROM_PLANE_MAP_FULL_PROGRAM.get(
+                FLICKERING_POINT_LIGHTS=0
+            ))
+            glBindTextureUnit(0, self._light_planemap)
+            glBindTextureUnit(1, self._light_data_texture)
+            glBindVertexArray(viewport.get_dummy_vao())
+            glDrawArrays(GL_TRIANGLES, 0, 3)
+
     def _drawlights_fullscreen(self):
         glEnable(GL_BLEND)
         glDisable(GL_DEPTH_TEST)
@@ -318,15 +381,30 @@ class Renderer(object):
         glBlendFunc(GL_ONE, GL_ONE)
         glUseProgram(_DRAW_LIGHTS_FULLSCREEN_PROGRAM.get(
             FLICKERING_POINT_LIGHTS=0,
-            OUTPUT_CIRCULAR_HARMONICS=0
+            OUTPUT_CIRCULAR_HARMONICS=0,
         ))
         glBindTextureUnit(0, self._light_data_texture)
         glBindTextureUnit(1, self._light_planemap)
         glUniform1f(0, 1.0 / self._num_lights)
-        # from time import time
-        # glUniform1i(1, int(time() * 10))
         glBindVertexArray(viewport.get_dummy_vao())
         glDrawArrays(GL_TRIANGLES, 0, 3  * self._num_lights)
+        glBlendFunc(GL_ONE, GL_ZERO)
+
+    def _drawlights(self):
+        glEnable(GL_BLEND)
+        glDisable(GL_DEPTH_TEST)
+        glBlendEquation(GL_FUNC_ADD)
+        glBlendFunc(GL_ONE, GL_ONE)
+        glUseProgram(_DRAW_LIGHTS_PROGRAM.get(
+            FLICKERING_POINT_LIGHTS=0,
+            OUTPUT_CIRCULAR_HARMONICS=0,
+        ))
+        glBindTextureUnit(0, self._light_data_texture)
+        glBindTextureUnit(1, self._light_planemap)
+        glBindTextureUnit(2, self._light_bbox_texture)
+        glUniform1f(0, 1.0 / self._num_lights)
+        glBindVertexArray(viewport.get_dummy_vao())
+        glDrawArrays(GL_TRIANGLES, 0, 6 * self._num_lights)
         glBlendFunc(GL_ONE, GL_ZERO)
 
     def _draw(self, wnd):
@@ -335,13 +413,24 @@ class Renderer(object):
         self._generate_plane_maps_full()
 
         glViewport(0, 0, wnd.width, wnd.height)
-        self._drawlights_fullscreen()
+
+        if self._fullscreen_draw_lights:
+            self._drawlights_fullscreen()
+        else:
+            self._drawlights()
 
         glUseProgram(_DRAW_V1_LINE_BVH_PROGRAM.get(ONLY_LINES=1))
         glBindTextureUnit(0, self._line_bvh_texture)
         glBindVertexArray(viewport.get_dummy_vao())
         glDrawArrays(GL_LINES, 0, self._line_bvh_num_nodes * 16)
 
+        if self._draw_pl_bbox:
+            glUseProgram(_DRAW_POINTLIGHT_BBOXES_PROGRAM.get())
+            glBindTextureUnit(0, self._light_bbox_texture)
+            glBindVertexArray(viewport.get_dummy_vao())
+            glDrawArrays(GL_LINES, 0, self._num_lights * 8)
+
+        self.timer_overlay.update(wnd.width, wnd.height)
         wnd.redraw()
 
 
@@ -349,6 +438,10 @@ class Renderer(object):
         glViewport(0, 0, width, height)
 
     def _keypress(self, wnd, key, x, y):
+        if key == b'p':
+            self._fullscreen_draw_lights ^= 1
+        if key == b'b':
+            self._draw_pl_bbox ^= 1
         wnd.redraw()
 
     def _drag(self, wnd, x, y, button):

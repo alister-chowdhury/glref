@@ -117,7 +117,7 @@ vec3 evaluatePointLightContrib(float dist, vec3 col, float decayRate)
 }
 
 
-
+// Looks pretty bad at grazing angles
 // https://www.geogebra.org/calculator/kshrzucz
 float getSmoothPlaneVisibility(vec2 uv, vec3 sampledNormalAndDistance)
 {
@@ -134,6 +134,11 @@ float getSmoothPlaneVisibility(vec2 uv, vec3 sampledNormalAndDistance)
                              / max(0.00001, dists.y - dists.x);
 
     return max(0.0, min(1.0, visibility));
+}
+
+float getBinaryPlaneVisibility(vec2 uv, vec3 sampledNormalAndDistance)
+{
+    return float(dot(uv, sampledNormalAndDistance.xy) < sampledNormalAndDistance.z);
 }
 
 
