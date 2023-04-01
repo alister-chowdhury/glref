@@ -34,10 +34,10 @@ _GEN_BBOX_FROM_PLANE_MAP_FULL_PROGRAM = viewport.make_permutation_program(
     GL_FRAGMENT_SHADER = line_bvh.plv1.GEN_BBOX_FROM_PLANE_MAP_FRAG
 )
 
-_GEN_OOBOX_FROM_PLANE_MAP_FULL_PROGRAM = viewport.make_permutation_program(
+_GEN_OBBOX_FROM_PLANE_MAP_FULL_PROGRAM = viewport.make_permutation_program(
     _DEBUGGING,
     GL_VERTEX_SHADER = _DRAW_FULL_SCREEN_PATH,
-    GL_FRAGMENT_SHADER = line_bvh.plv1.GEN_OOBOX_FROM_PLANE_MAP_FRAG
+    GL_FRAGMENT_SHADER = line_bvh.plv1.GEN_OBBOX_FROM_PLANE_MAP_FRAG
 )
 
 _DRAW_POINTLIGHT_BBOXES_PROGRAM = viewport.make_permutation_program(
@@ -46,9 +46,9 @@ _DRAW_POINTLIGHT_BBOXES_PROGRAM = viewport.make_permutation_program(
     GL_FRAGMENT_SHADER = line_bvh.plv1.DRAW_BBOX_FRAG
 )
 
-_DRAW_POINTLIGHT_OOBOXES_PROGRAM = viewport.make_permutation_program(
+_DRAW_POINTLIGHT_OBBOXES_PROGRAM = viewport.make_permutation_program(
     _DEBUGGING,
-    GL_VERTEX_SHADER = line_bvh.plv1.DRAW_OOBOX_VERT,
+    GL_VERTEX_SHADER = line_bvh.plv1.DRAW_OBBOX_VERT,
     GL_FRAGMENT_SHADER = line_bvh.plv1.DRAW_BBOX_FRAG
 )
 
@@ -87,7 +87,7 @@ class Renderer(object):
 
 
         self._regen_every_frame = 0
-        self._use_oobox = 0
+        self._use_obbox = 0
         self._fullscreen_draw_lights = 0
         self._draw_pl_bbox = 0
         self._test_pos_x = 0.5
@@ -359,15 +359,15 @@ class Renderer(object):
             0
         )
 
-        light_oobox_texture_ptr = ctypes.c_int()
-        glCreateTextures(GL_TEXTURE_1D, 1, light_oobox_texture_ptr)
-        self._light_oobox_texture = light_oobox_texture_ptr.value
-        glTextureStorage1D(self._light_oobox_texture, 1, GL_RGBA32UI, self._num_lights)
-        glTextureParameteri(self._light_oobox_texture, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE)
-        glTextureParameteri(self._light_oobox_texture, GL_TEXTURE_MIN_FILTER, GL_NEAREST)
-        glTextureParameteri(self._light_oobox_texture, GL_TEXTURE_MAG_FILTER, GL_NEAREST)
-        self._light_oobox_fb = viewport.WrappedFramebuffer().add_col_attachment(
-            self._light_oobox_texture,
+        light_obbox_texture_ptr = ctypes.c_int()
+        glCreateTextures(GL_TEXTURE_1D, 1, light_obbox_texture_ptr)
+        self._light_obbox_texture = light_obbox_texture_ptr.value
+        glTextureStorage1D(self._light_obbox_texture, 1, GL_RGBA32UI, self._num_lights)
+        glTextureParameteri(self._light_obbox_texture, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE)
+        glTextureParameteri(self._light_obbox_texture, GL_TEXTURE_MIN_FILTER, GL_NEAREST)
+        glTextureParameteri(self._light_obbox_texture, GL_TEXTURE_MAG_FILTER, GL_NEAREST)
+        self._light_obbox_fb = viewport.WrappedFramebuffer().add_col_attachment(
+            self._light_obbox_texture,
             0
         )
 
@@ -403,8 +403,8 @@ class Renderer(object):
             glDrawArrays(GL_TRIANGLES, 0, 3)
 
         # Generate OOB
-        with self._light_oobox_fb.bind():
-            glUseProgram(_GEN_OOBOX_FROM_PLANE_MAP_FULL_PROGRAM.get(
+        with self._light_obbox_fb.bind():
+            glUseProgram(_GEN_OBBOX_FROM_PLANE_MAP_FULL_PROGRAM.get(
                 FLICKERING_POINT_LIGHTS=0
             ))
             glBindTextureUnit(0, self._light_planemap)
@@ -437,12 +437,12 @@ class Renderer(object):
         glUseProgram(_DRAW_LIGHTS_PROGRAM.get(
             FLICKERING_POINT_LIGHTS=0,
             OUTPUT_CIRCULAR_HARMONICS=0,
-            USE_OOBOX=self._use_oobox
+            USE_OBBOX=self._use_obbox
         ))
         glBindTextureUnit(0, self._light_data_texture)
         glBindTextureUnit(1, self._light_planemap)
-        if self._use_oobox:
-            glBindTextureUnit(2, self._light_oobox_texture)
+        if self._use_obbox:
+            glBindTextureUnit(2, self._light_obbox_texture)
         else:
             glBindTextureUnit(2, self._light_bbox_texture)
         glUniform1f(0, 1.0 / self._num_lights)
@@ -469,9 +469,9 @@ class Renderer(object):
         glDrawArrays(GL_LINES, 0, self._line_bvh_num_nodes * 16)
 
         if self._draw_pl_bbox:
-            if self._use_oobox:
-                glUseProgram(_DRAW_POINTLIGHT_OOBOXES_PROGRAM.get())
-                glBindTextureUnit(0, self._light_oobox_texture)
+            if self._use_obbox:
+                glUseProgram(_DRAW_POINTLIGHT_OBBOXES_PROGRAM.get())
+                glBindTextureUnit(0, self._light_obbox_texture)
                 glBindVertexArray(viewport.get_dummy_vao())
                 glDrawArrays(GL_LINES, 0, self._num_lights * 8)
 
@@ -490,7 +490,7 @@ class Renderer(object):
 
     def _keypress(self, wnd, key, x, y):
         if key == b'o':
-            self._use_oobox ^= 1
+            self._use_obbox ^= 1
         elif key == b'p':
             self._fullscreen_draw_lights ^= 1
         elif key == b'b':

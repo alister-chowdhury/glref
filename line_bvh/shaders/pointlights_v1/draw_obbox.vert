@@ -2,7 +2,7 @@
 
 // dispatch GL_LINES, 8 * numLights
 
-layout(binding=0) uniform usampler1D lightOOBox;
+layout(binding=0) uniform usampler1D lightOBBox;
 layout(location=0) out vec3 col;
 
 uint wang_hash(uint seed)
@@ -37,7 +37,7 @@ void main()
     int lineIndex = index & 3; index /= 4;
     int entryIndex = index;
 
-    uvec4 data = texelFetch(lightOOBox, entryIndex, 0);
+    uvec4 data = texelFetch(lightOBBox, entryIndex, 0);
     vec2 uv = vec2(0);
 
     switch(lineIndex)
