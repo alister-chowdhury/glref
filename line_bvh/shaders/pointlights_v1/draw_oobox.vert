@@ -2,7 +2,7 @@
 
 // dispatch GL_LINES, 8 * numLights
 
-layout(binding=0) uniform sampler1D lightBBox;
+layout(binding=0) uniform usampler1D lightOOBox;
 layout(location=0) out vec3 col;
 
 uint wang_hash(uint seed)
@@ -37,15 +37,15 @@ void main()
     int lineIndex = index & 3; index /= 4;
     int entryIndex = index;
 
-    vec4 data = texelFetch(lightBBox, entryIndex, 0);
+    uvec4 data = texelFetch(lightOOBox, entryIndex, 0);
     vec2 uv = vec2(0);
 
     switch(lineIndex)
     {
-        case 0: uv = (pointIndex == 0) ? data.xy : data.zy; break;
-        case 1: uv = (pointIndex == 0) ? data.zy : data.zw; break;
-        case 2: uv = (pointIndex == 0) ? data.zw : data.xw; break;
-        case 3: uv = (pointIndex == 0) ? data.xw : data.xy; break;
+        case 0: uv = (pointIndex == 0) ? unpackHalf2x16(data.x) : unpackHalf2x16(data.y); break;
+        case 1: uv = (pointIndex == 0) ? unpackHalf2x16(data.y) : unpackHalf2x16(data.z); break;
+        case 2: uv = (pointIndex == 0) ? unpackHalf2x16(data.z) : unpackHalf2x16(data.w); break;
+        case 3: uv = (pointIndex == 0) ? unpackHalf2x16(data.w) : unpackHalf2x16(data.x); break;
         default: break;
     }
 

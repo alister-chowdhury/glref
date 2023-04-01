@@ -15,7 +15,16 @@ layout(location=0) out vec4 outBBox;
 vec2 projectRay(vec3 planeAndDistance, float theta)
 {
     vec2 rd = vec2(cos(theta), sin(theta));
-    float distToPlane = planeAndDistance.z / dot(planeAndDistance.xy, rd);
+    float denom = dot(planeAndDistance.xy, rd);
+
+    // Prevent divisions by zero and excessive expansion at grazing angles
+    float onedeg = 0.01745240643728351;
+    if(abs(denom) <= onedeg)
+    {
+        return vec2(0);
+    }
+
+    float distToPlane = planeAndDistance.z / denom;
     return rd * distToPlane;
 }
 
