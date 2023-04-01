@@ -634,13 +634,19 @@ class Renderer(object):
             glBindVertexArray(viewport.get_dummy_vao())
             glDrawArrays(GL_TRIANGLES, 0, 3)
         else:
+            use_line_bvh = 1
             glUseProgram(_DRAW_UNIFORM_PROBE_SPHERE_TEST.get(
                 DF_TEXTURE_LOC=0,
-                DF_PARAMS_LOC=0
+                DF_PARAMS_LOC=0,
+                USE_LINE_BVH=use_line_bvh,
+                LINE_BVH_V1_LOC=0
             ))
-            glBindTextureUnit(0, self._df_texture)
-            bias = 0.5 / (DF_RESOLUTION >> DF_NUM_MIPS)
-            glUniform2f(0, bias, DF_NUM_MIPS)
+            if use_line_bvh:
+                glBindTextureUnit(0, self._line_bvh_texture)
+            else:
+                glBindTextureUnit(0, self._df_texture)
+                bias = 0.5 / (DF_RESOLUTION >> DF_NUM_MIPS)
+                glUniform2f(0, bias, DF_NUM_MIPS)
             glUniform4f(
                 1,
                 PROBE_RESOLUTION,

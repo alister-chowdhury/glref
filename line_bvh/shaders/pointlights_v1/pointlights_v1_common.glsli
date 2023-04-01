@@ -1,0 +1,147 @@
+#ifndef POINTLIGHTS_V1_COMMON_GLSLI
+#define POINTLIGHTS_V1_COMMON_GLSLI
+
+#include "../../../shaders/common.glsl"
+
+
+struct PointLightData
+{
+    vec2  position;
+    float decayRate;
+    vec3  colour;
+};
+
+
+struct FlickeringPointLightData
+{
+    vec2  position;
+    float decayRate;
+    vec3  colour;
+    float decayFreq;
+    float colourFreq;
+    float decayRate2;
+    vec3  colour2;
+};
+
+
+#define POINTLIGHT_DATA_STRIDE              1
+#define FLICKERING_POINTLIGHT_DATA_STRIDE   2
+
+
+struct PointLightDataPacked
+{
+
+    uvec4 V0;   // .xy = position  [asfloat]
+                // .z  = decayRate [asfloat]
+                // .w  = colour    [r11g11b10f]
+};
+
+
+struct FlickeringPointLightDataPacked
+{
+
+    uvec4 V0;   // .xy = position  [asfloat]
+                // .z  = decayRate [asfloat]
+                // .w  = colour    [r11g11b10f]
+    
+    uvec4 V1;   // .x  = decayFreq  [asfloat]
+                // .y  = colourFreq [asfloat]
+                // .z  = decayRate2 [asfloat]
+                // .w  = colour2    [r11g11b10f]
+};
+
+
+PointLightData unpackPointLightData(PointLightDataPacked data)
+{
+    PointLightData result;
+    result.position = uintBitsToFloat(data.V0.xy);
+    result.decayRate = uintBitsToFloat(data.V0.z);
+    result.colour = unpackR11G11B10(data.V0.w);
+    return result;
+}
+
+FlickeringPointLightData unpackFlickeringPointLightData(FlickeringPointLightDataPacked data)
+{
+    FlickeringPointLightData result;
+    result.position = uintBitsToFloat(data.V0.xy);
+    result.decayRate = uintBitsToFloat(data.V0.z);
+    result.colour = unpackR11G11B10(data.V0.w);
+    result.decayFreq = uintBitsToFloat(data.V1.x);
+    result.colourFreq = uintBitsToFloat(data.V1.y);
+    result.decayRate2 = uintBitsToFloat(data.V1.z);
+    result.colour2 = unpackR11G11B10(data.V1.w);
+    return result;
+}
+
+
+PointLightData collapseFlickeringPointLightData(FlickeringPointLightData data, float time)
+{
+    PointLightData result;
+    result.position = data.position;
+    // Probably need a better way to do this, otherwise floating point precision will start being an issue.
+    // or need to enforce the rates being something divisible by a second, so it can be reset every now and again.
+    result.decayRate = mix(data.decayRate, data.decayRate2, sin(time * data.decayFreq) * 0.5 + 0.5);
+    result.colour = mix(data.colour, data.colour2, sin(time * data.colourFreq) * 0.5 + 0.5);
+    return result;
+}
+
+
+PointLightData loadPointLightData(usampler1D lightingData, int index)
+{
+    PointLightDataPacked packedData;
+    index *= POINTLIGHT_DATA_STRIDE;
+    packedData.V0 = texelFetch(lightingData, index, 0);
+    return unpackPointLightData(packedData);
+}
+
+
+FlickeringPointLightData loadFlickeringPointLightData(usampler1D lightingData, int index)
+{
+    FlickeringPointLightDataPacked packedData;
+    index *= POINTLIGHT_DATA_STRIDE;
+    packedData.V0 = texelFetch(lightingData, index, 0);
+    packedData.V1 = texelFetch(lightingData, index + 1, 0);
+    return unpackFlickeringPointLightData(packedData);
+}
+
+
+float evaluatePointLightAttenuation(float dist, float decayRate)
+{
+    return pow(dist + 1.0, -decayRate);
+}
+
+
+vec3 evaluatePointLightContrib(float dist, vec3 col, float decayRate)
+{
+    return col * evaluatePointLightAttenuation(dist, decayRate);
+}
+
+
+
+// https://www.geogebra.org/calculator/kshrzucz
+float getSmoothPlaneVisibility(vec2 uv, vec3 sampledNormalAndDistance)
+{
+    float invLength = inversesqrt(dot(sampledNormalAndDistance.xy,
+                                      sampledNormalAndDistance.xy));
+    
+    vec2 N = sampledNormalAndDistance.xy * invLength;
+
+    vec2 dists = vec2(sampledNormalAndDistance.z,
+                      sampledNormalAndDistance.z * invLength);
+    dists = vec2(min(dists.x, dists.y), max(dists.x, dists.y));
+
+    float visibility = 1.0 - (dot(uv, N) - dists.x)
+                             / max(0.00001, dists.y - dists.x);
+
+    return max(0.0, min(1.0, visibility));
+}
+
+
+float getPlaneMapSampleU(vec2 uv, vec2 center)
+{
+    vec2 duv = uv - center;
+    return fastAtan2_div2pi(duv.y, duv.x);
+}
+
+
+#endif // POINTLIGHTS_V1_COMMON_GLSLI

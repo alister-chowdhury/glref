@@ -1,7 +1,12 @@
 #version 460 core
 
 #include "../../../shaders/common.glsl"
+
+#if USE_LINE_BVH
+#include "../v1_tracing.glsli"
+#else // USE_LINE_BVH
 #include "../df_tracing.glsli"
+#endif // USE_LINE_BVH
 #include "../ch_common.glsli"
 
 
@@ -27,7 +32,11 @@ void accumIfVisible(vec2 ro,
 {
     vec2 duv = cornerUv - ro;
     float l = length(duv);
+#if USE_LINE_BVH
+    if(traceLineBvhV1(ro, duv, 1.0, true).hitLineId == 0xffffffffu)
+#else
     if(df_trace(uv, duv / l, l).visible)
+#endif
     {
         totalWeight += weight;
         ivec2 coord = ivec2(cornerUv * probeSizeAndInvSize.xy);
@@ -49,6 +58,10 @@ void main()
     }
 
     vec2 uv2 = uv - probeSizeAndInvSize.zw * 0.5;
+
+#if USE_LINE_BVH
+    uv2 = uv;
+#endif // USE_LINE_BVH
 
     vec2 shNormal = normalize(vec3(innerNDC, sqrt(1.0 - d))).xy;
     vec2 probeCorner = probeSizeAndInvSize.xy * uv2;
@@ -86,7 +99,7 @@ void main()
             max(0., CH2RadianceEval(CHR, shNormal)),
             max(0., CH2RadianceEval(CHG, shNormal)),
             max(0., CH2RadianceEval(CHB, shNormal))
-        ) * 10.0;
+        ) * 50.0;
 #elif 1
         CH2 evalBasis = CH2Basis(-shNormal);
         value = vec3(

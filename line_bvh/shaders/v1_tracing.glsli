@@ -28,6 +28,7 @@ struct LineBvhV1Result
 {
     uint    hitLineId;
     float   hitDistSq;
+    vec4    line; // ptA = line.xy, ptB = line.xy - line.zw
     float   hitLineInterval;
     vec2    dUV; // ro + dUV = intersection point
     int     numNodesVisited;
@@ -38,7 +39,7 @@ struct FindNearestLineBvhV1Result
 {
     uint    hitLineId;
     float   hitDistSq;
-    vec4    line;
+    vec4    line; // ptA = line.xy, ptB = line.xy - line.zw
     int     numNodesVisited;
     int     numLineIntersections;
 };
@@ -75,6 +76,7 @@ bool lineBvhV1EvalEntry(vec2 ro,
         {
             result.hitLineId = floatBitsToUint(metadata.y);
             result.hitLineInterval = -u / abs(d);
+            result.line = data;
             result.dUV *= -v / abs(d);
             result.hitDistSq = dot(result.dUV, result.dUV);
         }
@@ -235,7 +237,7 @@ bool findNearestLineBvhV1EvalEntry(vec2 ro,
         if(nearestDistSq < result.hitDistSq)
         {
             result.hitLineId = floatBitsToUint(metadata.y);
-            result.line = vec4(data.xy, data.xy - data.zw);
+            result.line = data;
             result.hitDistSq = nearestDistSq;
         }
 

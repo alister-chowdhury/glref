@@ -85,4 +85,23 @@ int triangleToQuadVertexIdZ(int vertexId)
     return vertexId - 2;
 }
 
+
+uint packR11G11B10(vec3 value)
+{
+    uint r = (packHalf2x16(vec2(value.x, 0.0)) << 17u) & 0xffe00000u;
+    uint g = (packHalf2x16(vec2(value.y, 0.0)) << 6u) & 0x001ffc00u;
+    uint b = (packHalf2x16(vec2(value.z, 0.0)) >> 5u) & 0x000003ffu;
+    return r | g | b;
+}
+
+
+vec3 unpackR11G11B10(uint value)
+{
+    return vec3(
+        unpackHalf2x16((value >> 17u) & 0x7ff0u).x,
+        unpackHalf2x16((value >> 6u) & 0x7ff0u).x,
+        unpackHalf2x16((value << 5u) & 0x7fe0u).x
+    );
+}
+
 #endif
