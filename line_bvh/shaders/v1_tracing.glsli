@@ -77,7 +77,7 @@ bool lineBvhV1EvalEntry(vec2 ro,
             result.hitLineId = floatBitsToUint(metadata.y);
             result.hitLineInterval = -u / abs(d);
             result.line = data;
-            result.dUV *= -v / abs(d);
+            result.dUV *= v / abs(d);
             result.hitDistSq = dot(result.dUV, result.dUV);
         }
 
