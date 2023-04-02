@@ -256,3 +256,154 @@ def build_line_bvh_v1(lines, fast_build=True):
     return result[BVH_IDX_EXTRA_DATA].reshape(
         (len(result[BVH_IDX_EXTRA_DATA])//4, 4)
     )
+
+
+# For WEBGL stuff, this should be done using WASM
+
+class LineBvhV1Result(object):
+
+     def __init__(self):
+        self.hit_line_id = 0xffffffff
+        self.hit_dist_sq = 0
+        self.line = (0, 0, 0, 0)
+        self.hit_line_interval = 0
+        self.duv = array((0, 0)) # ro + dUV = intersection point
+
+
+def line_bvh_v1_eval_entry(ro, inv_rd, metadata, data, result):
+    """Helper function to evaluate a BVH entry.
+
+    Args:
+        ro (float2): Ray origin.
+        inv_rd (float2): Inverse ray direction.
+        metadata (float2): BVH metadata.
+        data (float4): BVH entry data.
+        result (LineBvhV1Result): Writeback.
+
+    Returns:
+        tuple: (add to stack, bbox hit distance, id to add)
+    """
+    if metadata[0] == METADATA_LINE:
+        A = ro
+        AB = -result.duv
+        C = data[0:2]
+        CD = data[2:4]
+        AC = A - C
+
+        d = AB[0] * CD[1] - AB[1] * CD[0] # cross(AB, CD)
+        u = AC[0] * AB[1] - AC[1] * AB[0] # cross(AC, AB)
+        v = AC[0] * CD[1] - AC[1] * CD[0] # cross(AC, CD)
+
+        dsign = sign(d)
+        u *= dsign
+        v *= dsign
+
+        if (min(u, v) > 0.0) and (max(u, v) < abs(d)):
+            result.hit_line_id = metadata[1].view(uint32)
+            result.hit_line_interval = -u / abs(d)
+            result.line = data
+            result.duv *= v / abs(d)
+            result.hit_dist_sq = (
+                result.duv[0] * result.duv[0]
+                + result.duv[1] * result.duv[1]
+            )
+
+    # metadata[0] == METADATA_BBOX
+    else:
+        bbox_min = data[0:2]
+        bbox_max = data[2:4]
+        xintervals = ((bbox_min[0] - ro[0]) * inv_rd[0], (bbox_max[0] - ro[0]) * inv_rd[0])
+        yintervals = ((bbox_min[1] - ro[1]) * inv_rd[1], (bbox_max[1] - ro[1]) * inv_rd[1])
+        if xintervals[0] > xintervals[1]:
+            xintervals = (xintervals[1], xintervals[0])
+        if yintervals[0] > yintervals[1]:
+            yintervals = (yintervals[1], yintervals[0])
+        intervals = (
+            max(0, max(xintervals[0], yintervals[0])),
+            min(xintervals[1], yintervals[1])
+        )
+
+        if (
+                (intervals[0] < intervals[1])
+                and ((intervals[0] * intervals[0]) < result.hit_dist_sq)
+        ):
+            return (
+                True,
+                intervals[0],
+                metadata[1].view(uint32)
+            )
+
+    return (False, 0, 0)
+
+
+# In C++ if we use it, template stop on first hit etc
+# really the GLSL version is a better reference
+def trace_line_bvh_v1(bvh_data, ro, rd, max_dist, stop_on_first_hit):
+    """Line trace a bvh.
+
+    Args:
+        bvh_data (numpy.array[float4]): BVH structure.
+        ro (float2): Ray direction
+        rd (float2): Ray origin
+        max_dist (float): Max distance to trace
+        stop_on_first_hit (bool): Whether or not to stop on the first hit
+
+    Returns:
+        LineBvhV1Result: Result.
+    """
+
+    ro = array(ro)
+    rd = array(rd)
+
+    result = LineBvhV1Result()
+    result.hit_dist_sq = max_dist * max_dist
+    result.duv = rd * max_dist
+
+    head = 0
+    stack = []
+
+    inv_rd = 1.0 / rd
+
+    while True:
+        v0 = bvh_data[head]
+        left_meta = v0[0:2]
+        left_data = bvh_data[head + 1]
+        right_meta = v0[2:4]
+        right_data = bvh_data[head + 2]
+
+        left_add_to_stack, left_dist, left_id = line_bvh_v1_eval_entry(
+            ro,
+            inv_rd,
+            left_meta,
+            left_data,
+            result
+        )
+
+        right_add_to_stack, right_dist, right_id = line_bvh_v1_eval_entry(
+            ro,
+            inv_rd,
+            right_meta,
+            right_data,
+            result
+        )
+
+        if stop_on_first_hit:
+            if result.hit_line_id != 0xffffffff:
+                break
+
+        # Prioritise nearest
+        if left_add_to_stack and right_add_to_stack:
+            if left_dist < right_dist:
+                left_id, right_id = right_id, left_id
+            stack.append(left_id)
+            head = right_id
+        elif left_add_to_stack:
+            head = left_id
+        elif right_add_to_stack:
+            head = right_id
+        elif stack:
+            head = stack.pop()
+        else:
+            break
+
+    return result

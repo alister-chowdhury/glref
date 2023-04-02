@@ -262,9 +262,9 @@ class Renderer(object):
         )
         lines_data = lines_data.reshape((len(lines_data)//4, 4))
 
-        line_bvh_data = line_bvh.build_line_bvh_v1(lines_data)
-        self._line_bvh_num_float4 = len(line_bvh_data)
-        self._line_bvh_num_nodes = len(line_bvh_data) // 3
+        self._line_bvh_data = line_bvh.build_line_bvh_v1(lines_data)
+        self._line_bvh_num_float4 = len(self._line_bvh_data)
+        self._line_bvh_num_nodes = len(self._line_bvh_data) // 3
         line_bvh_texture_ptr = ctypes.c_int()
         glCreateTextures(GL_TEXTURE_1D, 1, line_bvh_texture_ptr)
         self._line_bvh_texture = line_bvh_texture_ptr.value
@@ -276,7 +276,7 @@ class Renderer(object):
             self._line_bvh_texture, 0, 0,
             self._line_bvh_num_float4,
             GL_RGBA, GL_FLOAT,
-            line_bvh_data.tobytes()
+            self._line_bvh_data.tobytes()
         )
 
         lights = [

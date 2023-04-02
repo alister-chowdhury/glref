@@ -1,5 +1,5 @@
 import os
-from .v1 import build_line_bvh_v1
+from .v1 import build_line_bvh_v1, trace_line_bvh_v1
 
 _SHADER_DIR = os.path.abspath(
     os.path.join(__file__, "..", "shaders")
