@@ -309,6 +309,10 @@ class Renderer(object):
         #     for _ in range(num_rand_lights)
         # ]
 
+
+        for i, light in enumerate(lights):
+            light.construct_visibility_mesh(lines_data[:], i)
+
         self._num_lights = len(lights)
 
         light_data_texture_ptr = ctypes.c_int()
