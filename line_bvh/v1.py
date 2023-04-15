@@ -237,7 +237,6 @@ def make_bvh_iter(entries, allocator, fast_build=True, sorted_dim=-1):
     )
 
 
-
 def build_line_bvh_v1(lines, fast_build=True):
 
     if not len(lines):

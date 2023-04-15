@@ -210,11 +210,13 @@ bool findNearestLineBvhV1EvalEntry(vec2 ro,
                                    inout int idx)
 {
     
-    // https://www.geogebra.org/calculator/xq2q58w4
+    // https://www.geogebra.org/calculator/axmebcr6
     if(floatBitsToInt(metadata).x == LINE_BVH_V1_LINE_TYPE)
     {
         ++result.numLineIntersections;
 
+        // TODO: Faster method:
+        // https://www.geogebra.org/calculator/aajzrdep
         vec2 Ld = -data.zw;
         vec2 Ln = normalize(vec2(Ld.y, -Ld.x));
         vec2 L0 = data.xy - ro;
