@@ -14,12 +14,6 @@ def cross(a, b):
     return a[0] * b[1] - a[1] * b[0]
 
 
-def ccw_weight(dab, dcb):
-    numerator = cross(dab, dcb)
-    denom = dot(dab, dcb)
-    return pi - arctan2(-numerator, -denom)
-
-
 def ray_line_intersection_ro0(rd, a, dpt):
     """Calculate the ray line intersection where Ro=(0, 0).
 
@@ -247,20 +241,6 @@ lines_data = (array([
     0.14079554862997093, 0.5492903988850911, 0.22654714073198898, 0.5160397815394108,
     0.22654714073198898, 0.5160397815394108, 0.2562976930939136, 0.5772909187551378,
     0.2562976930939136, 0.5772909187551378, 0.1285453211868255, 0.614041601084574,
-
-
-    # -1, -1, -1, 1,
-    # -1, 1, 1, 1,
-    # 1, 1, 1, -1,
-    # 1, -1, -1, -1,
-
-
-    # -10, -10, -10, 10,
-    # -10, 10, 10, 10,
-    # 10, 10, 10, -10,
-    # 10, -10, -10, -10,
-
-
 ], dtype=float32)
     * 0.5 + 0.5
 )
@@ -269,35 +249,6 @@ lines_data = lines_data.reshape((len(lines_data)//4, 4))
 
 total_iterations = 0
 
-
-
-
-def trace_ray(bvh, origin, ray):
-    intersection = line_bvh.trace_line_bvh_v1(bvh, origin, ray, 10.0, False)
-    # Handle no intersection by adding virtual lines
-    if intersection.hit_line_id == 0xffffffff:
-        for i in range(4):
-            # [0, 0] => [1, 1] box
-            x0 = i & 1
-            y0 = (i >> 1) & 1
-            x1 = (i + 1) & 1
-            y1 = ((i + 1) >> 1) & 1
-
-            a = array((x0, y0)) - origin
-            dpt = array((x1, y1)) - array((x0, y0))
-            interval = ray_line_intersection_ro0(ray, a, dpt)
-
-            if interval >= 0 and interval <= 1:
-                intersection.hit_line_interval = interval
-                intersection_point = array((x0, y0)) + interval * dpt
-                intersection.hit_line_id = 0xffffffff - i
-                intersection.duv = intersection_point - origin
-                intersection.hit_dist_sq = intersection.duv[0]**2 + intersection.duv[1]**2
-                break
-    return intersection
-
-
-
 def binary_search_trace(origin, bvh, prev_end, new_start, max_iterations=1024):
     vertices = []
     while max_iterations > 0:
@@ -305,8 +256,7 @@ def binary_search_trace(origin, bvh, prev_end, new_start, max_iterations=1024):
         ray = prev_end[1] + new_start[1]
         norm_factor = sqrt(ray[0]**2 + ray[1]**2)
         ray /= norm_factor
-        # new_intersection = line_bvh.trace_line_bvh_v1(bvh, origin, ray, 10.0, False)
-        new_intersection = trace_ray(bvh, origin, ray)
+        new_intersection = line_bvh.trace_line_bvh_v1(bvh, origin, ray, 10.0, False)
         global total_iterations
         total_iterations += 1
         if new_intersection.hit_line_id == prev_end[0].hit_line_id:
@@ -350,8 +300,7 @@ def construct_visibility_mesh(origin, bvh, lines):
     rays = column_stack((cos(thetas), sin(thetas)))
 
     intersections = [
-        # (line_bvh.trace_line_bvh_v1(bvh, origin, ray, 10.0, False), ray)
-        (trace_ray(bvh, origin, ray), ray)
+        (line_bvh.trace_line_bvh_v1(bvh, origin, ray, 10.0, False), ray)
         for ray in rays
     ]
 
@@ -373,81 +322,47 @@ def construct_visibility_mesh(origin, bvh, lines):
             binary_search_trace(origin, bvh, prev_end, new_start)
         )
 
-    # Remove degenerate vertices
-    i = 0
-    while i < len(vertices):
-        a = vertices[i]
-        b = vertices[i - 1]
-        dab = b - a
-        if dot(dab, dab) < 1e-7:
-            vertices[i-1] = (vertices[i-1] + vertices[i]) * 0.5
-            vertices.pop(i)
-            continue
-        i += 1
-
-    # Remove degenerate triangles
-    i = 0
-    while i < len(vertices):
-        a = vertices[i]
-        b = vertices[i - 2]
-        dab = b - a
-        if dot(dab, dab) < 1e-7:
-            vertices[i-2] = (vertices[i-2] + vertices[i]) * 0.5
-            vertices.pop(i)
-            vertices.pop(i-1)
-            i -= 1
-            if i < 0:
-                i = 0
-            continue
-        i += 1
-
-    # Add a pass to make segments which basically make up the same line
-    # continous
-
     queued_indices = list(range(len(vertices)))
     index_buffer = []
 
 
-    while len(queued_indices) > 2:
+    # Triangulate (BROKEN)
+    while queued_indices:
+        if len(queued_indices) == 3:
+            index_buffer.append(queued_indices)
+            break
 
         i = 0
         while i < len(queued_indices):
-            ia = queued_indices[i - 1]
-            ib = queued_indices[i]
-            ic = queued_indices[(i + 1) % len(queued_indices)]
+            ia = queued_indices[i - 2]
+            ib = queued_indices[i - 1]
+            ic = queued_indices[i - 0]
             a = vertices[ia]
             b = vertices[ib]
             c = vertices[ic]
 
-            # Stay on the correct side
-            N = array((b[1] - a[1], a[0] - b[0]))
-            w = dot(N, b)
-            if (dot(N, c) - w) < 0:
+            mid = (a + b + c) / 3 - origin
 
-                # Make sure a->c doesn't intersect with anything
-                ok = True
-                ca = c - a
-                for j in range(len(vertices)):
-                    cmpa = vertices[j - 1]
-                    cmpb = vertices[j]
-                    interval = line_line_intersection(a, ca, cmpa, cmpb-cmpa)
-                    if interval > (1e-10) and interval < (1 - 1e-10):
-                        ok = False
-                        break
+            hita = line_line_intersection(origin, mid, a, b - a)
+            hitb = line_line_intersection(origin, mid, b, c - b)
 
-                if ok:
-                    index_buffer.append((ia, ib, ic))
-                    queued_indices.pop(i)
-                    continue
+            ok = not (
+                (hita >= 0 and hita <= 1)
+                or (hitb >= 0 and hitb <= 1)
+            )
 
+            if ok:
+                index_buffer.append((ia, ib, ic))
+                # print("{{{0}}}".format(
+                #     ",".join(
+                #         "({0[0]:f},{0[1]:f})".format(vertices[x])
+                #         for x in (ia, ib, ic)
+                #     )
+                # ))
+                # exit()
+                queued_indices.pop(i - 1)
+                # break
             i += 1
-            # print(len(queued_indices))
-
-
-            # if(len(queued_indices) < 3):
-            #     break
-            # if len(queued_indices) == 3:
-            #     queued_indices = []
 
         # if len(queued_indices) == 4:
         #     print("{{{0}}}".format(
@@ -471,7 +386,6 @@ def construct_visibility_mesh(origin, bvh, lines):
         c = vertices[c]
         lines_debug.append((a[0], a[1], b[0], b[1]))
         lines_debug.append((b[0], b[1], c[0], c[1]))
-        lines_debug.append((c[0], c[1], a[0], a[1]))
 
 
     # lines_debug = [
@@ -502,10 +416,8 @@ def construct_visibility_mesh(origin, bvh, lines):
 if __name__ == "__main__":
 
     bvh = line_bvh.build_line_bvh_v1(lines_data)
-    # origin = array((0.125, 0.5))
+    origin = array((0.125, 0.5))
     # origin = array((0.4, 0.75))
     # origin = array((0.65, 0.5))
-    # origin = array((0.55, 0.25))
-    origin = array((0.4,0.57))
     construct_visibility_mesh(origin, bvh, lines_data)
     print(total_iterations)

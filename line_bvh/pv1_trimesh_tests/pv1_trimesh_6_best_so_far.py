@@ -1,23 +1,14 @@
 from numpy import *
 
-import os
-import sys
 
-sys.path.append(os.path.abspath(
-    os.path.join(__file__, "..", "..", "..")
-))
 
-import line_bvh
+# ANNOYINGLY CLOSE TO WORKING
+# LIGHT B IS WEIRDING OUT THO!?
+# SOMEHOW A LINE HAS GONE PAST THE ORIGIN
 
 
 def cross(a, b):
     return a[0] * b[1] - a[1] * b[0]
-
-
-def ccw_weight(dab, dcb):
-    numerator = cross(dab, dcb)
-    denom = dot(dab, dcb)
-    return pi - arctan2(-numerator, -denom)
 
 
 def ray_line_intersection_ro0(rd, a, dpt):
@@ -34,12 +25,31 @@ def ray_line_intersection_ro0(rd, a, dpt):
     """
     # https://www.geogebra.org/calculator/dug27m5r
     denom = dpt[0] * rd[1] - dpt[1] * rd[0] # cross(B - A, rd)
+
     if denom != 0:
         denom = 1.0 / denom
         t = cross(dpt, a) * denom
         if t >= 0:
             return cross(rd, a) * denom
+    # if denom > 0:
+    #     # cross(rd, a) / denom
+    #     return (rd[0] * a[1] - rd[1] * a[0]) / denom
     return -1
+
+
+def ray_line_intersection(rd, a, dpt):
+    """Calculate the ray line intersection where Ro=Rd.
+
+    Args:
+        rd (array[float]): Ray direction
+        a (array[float]): Line point A
+        dpt (array[float]): B - A
+
+    Returns:
+        float: Intersection interval (t) : (a + dpt * t) = intersection point.
+               (only valid if 0 <= t <= 1)
+    """
+    return ray_line_intersection_ro0(rd, a - rd, dpt)
 
 
 def line_line_intersection(a, ba, c, dc, handle_parallel=False):
@@ -53,7 +63,7 @@ def line_line_intersection(a, ba, c, dc, handle_parallel=False):
         handle_parallel (bool): Handle parallel overlaps (Default: False).
 
     Returns:
-        float: Intersection interval (t) : (c + dc * t) = intersection point.
+        float: Intersection interval (t) : (a + ba * t) = intersection point.
                (only valid if 0 <= t <= 1)
     """
     # https://www.geogebra.org/calculator/ytnhzgzb
@@ -87,9 +97,263 @@ def line_line_intersection(a, ba, c, dc, handle_parallel=False):
     sign_d = sign(d)
     u = cross(ac, ba) * sign_d
     t = cross(ac, dc) * sign_d
-    if (min(u, t) >= 0) and (max(u, t) <= abs(d)):
+    if (min(u, t) > 0) and (max(u, t) <= abs(d)):
         return t / abs(d)
     return -1
+
+
+def ccw_weight(dab, dcb):
+    numerator = dab[0] * dcb[1] - dab[1] * dcb[0]
+    denom = dot(dab, dcb)
+    return pi - arctan2(-numerator, -denom)
+
+
+def colinear_rays(a, b):
+  """Check if two rays are approximately colinear.
+
+  Args:
+    a (array[float]): First ray direction
+    b (array[float]): Second ray direction
+
+  Returns:
+    bool: True if colinear.
+  """
+  return (dot(a, b)) > 0 and (abs(cross(a, b)) <= 1e-5)
+
+
+
+r"""
+
+Graph Based Polygon Subtraction
+
+
+We start with a base polygon which represents the current visibility span,
+orientated clockwise:
+
+ A---------------------------->B
+  ^                           /
+   \                         /
+    \                       /
+     \                     /
+      \                   /
+       \                 /
+        \               /
+         \             /
+          \           /
+           \         /
+            \       /
+             \     /
+              \   /
+               \ v
+                C
+
+
+We then project the line and calculate intersection points:
+
+
+ A-----------------X---------->B
+  ^               /           /
+   \             /           /
+    \           L0          /
+     \            \        /
+      \           L1------X
+       \                 /
+        \               /
+         \             /
+          \           /
+           \         /
+            \       /
+             \     /
+              \   /
+               \ v
+                C
+
+
+We then follow the graph, proceeding in the most clockwise direction, until
+# we hit a previously seen point.
+
+ A---------------->B
+  ^               /
+   \             V
+    \            C
+     \            \
+      \            D----->E
+       \                 /
+        \               /
+         \             /
+          \           /
+           \         /
+            \       /
+             \     /
+              \   /
+               \ v
+                F
+"""
+
+# There can only reasonably be an even number of intersections?
+# If RayA and RayB could only ever intesect once.
+
+
+class Vertex(object):
+
+  def __init__(self, pos):
+    self.pos = pos
+    self.child = None
+
+  def swap_child(self, new_child):
+    old_child = self.child
+    self.child = new_child
+    return old_child
+
+
+
+class VisibilityPolygon(object):
+
+    def __init__(self, triangle_scale=2):
+        # Init with a triangle
+        a = Vertex(array((-3.0 * triangle_scale, 0.0 * triangle_scale)))
+        b = Vertex(array((1.0 * triangle_scale, 2.0 * triangle_scale)))
+        c = Vertex(array((1.0 * triangle_scale, -2.0 * triangle_scale)))            
+        a.child = b
+        b.child = c
+        c.child = a
+        self.head = a
+
+    def get_vertices(self):
+        it = self.head
+        while True:
+            yield it
+            it = it.child
+            if it == self.head:
+                break
+
+
+    def add_line(self, line):
+        x0, y0, x1, y1 = line
+
+        # Ensure clockwise orientation
+        if (x1 * y0 - x0 * y1) < 0:
+            x0, y0, x1, y1 = x1, y1, x0, y0
+
+        a = array((x0, y0))
+        b = array((x1, y1))
+
+        if colinear_rays(a, b):
+            return
+
+        dba = b - a
+
+        # First the first edge that does NOT intersect with RayA
+        start_vertex = self.head
+        while True:
+            pta = start_vertex.pos
+            dpt = start_vertex.child.pos - pta
+            intersect_a = ray_line_intersection_ro0(a, pta, dpt)
+            if intersect_a < 0 or intersect_a > 1:
+                break
+            start_vertex = start_vertex.child
+            if start_vertex == self.head:
+                # Not totally sure this is possible under regular circumstances
+                raise RuntimeError("How did this happen?")
+                return
+
+        # Find the first edge that starts before A and ends after A
+        head_pivot = start_vertex
+        while True:
+            pta = start_vertex.pos
+            dpt = start_vertex.child.pos - pta
+            intersect_a = ray_line_intersection_ro0(a, pta, dpt)
+            if intersect_a >= 0 and intersect_a <= (1 + 1e-9):
+                break
+            start_vertex = start_vertex.child
+            if start_vertex == head_pivot:
+                # Not totally sure this is possible under regular circumstances
+                # raise RuntimeError("How did this happen?")
+                return
+
+        # Find the first edge that starts before B and ends after B
+        end_vertex = start_vertex
+        while True:
+            pta = end_vertex.pos
+            dpt = end_vertex.child.pos - pta
+            intersect_b = ray_line_intersection_ro0(b, pta, dpt)
+            if intersect_b >= 0 and intersect_b <= (1 + 1e-9):
+                break
+            end_vertex = end_vertex.child
+            if end_vertex == start_vertex:
+                # Not totally sure this is possible under regular circumstances
+                # raise RuntimeError("How did this happen?")
+                return
+
+        should_insert = False
+        inside_polygon = False
+        insertion_points = []
+
+        # RayA intersection
+        pta = start_vertex.pos
+        dpt = start_vertex.child.pos - pta
+        intersect_a = ray_line_intersection(a, pta, dpt)
+        if intersect_a > 0 and intersect_a <= (1 + 1e-9):
+            inside_polygon = True
+            should_insert = True
+            insertion_points.append(pta + dpt * intersect_a)
+            insertion_points.append(a)
+        # else:
+        #     start_vertex = start_vertex.child
+
+        # A->B intersections
+        it = start_vertex
+        while True:
+            if not inside_polygon:
+                insertion_points.append(it.pos)
+            pta = it.pos
+            dpt = it.child.pos - pta
+            t = line_line_intersection(a, dba, pta, dpt)
+            if t > 0 and t <= (1 + 1e-9):
+                should_insert = True
+                pos = a + dba * t
+                insertion_points.append(pos)
+                inside_polygon = not inside_polygon
+            it = it.child
+            if it == end_vertex.child:
+                break
+
+        # RayB intersection
+        pta = end_vertex.pos
+        dpt = end_vertex.child.pos - pta
+        intersect_b = ray_line_intersection(b, pta, dpt)
+
+        if intersect_b > 0 and intersect_b <= (1 + 1e-9):
+            should_insert = True
+            insertion_points.append(b)
+            insertion_points.append(pta + dpt * intersect_b)
+
+        if should_insert:
+            self.head = start_vertex
+            input_point = start_vertex
+            output_point = end_vertex.child
+            it = input_point
+            for pos in insertion_points:
+                vertex = Vertex(pos)
+                it.child = vertex
+                it = vertex
+            it.child = output_point
+
+            # Cleanup degenerates (ADD THIS AS A FINAL PASS?)
+            it = self.head
+            while it.child != self.head:
+                d = it.pos - it.child.pos
+                if sqrt(dot(d, d)) < 1e-7:
+                    it.child = it.child.child
+                it = it.child
+
+            it = self.head
+            while it.child.child != self.head:
+                d = it.pos - it.child.child.pos
+                if sqrt(dot(d, d)) < 1e-7:
+                    it.child = it.child.child.child
+                it = it.child
+
 
 
 lines_data = (array([
@@ -247,265 +511,28 @@ lines_data = (array([
     0.14079554862997093, 0.5492903988850911, 0.22654714073198898, 0.5160397815394108,
     0.22654714073198898, 0.5160397815394108, 0.2562976930939136, 0.5772909187551378,
     0.2562976930939136, 0.5772909187551378, 0.1285453211868255, 0.614041601084574,
-
-
-    # -1, -1, -1, 1,
-    # -1, 1, 1, 1,
-    # 1, 1, 1, -1,
-    # 1, -1, -1, -1,
-
-
-    # -10, -10, -10, 10,
-    # -10, 10, 10, 10,
-    # 10, 10, 10, -10,
-    # 10, -10, -10, -10,
-
-
 ], dtype=float32)
     * 0.5 + 0.5
 )
 lines_data = lines_data.reshape((len(lines_data)//4, 4))
+if __name__ == "__main__":
+    p = VisibilityPolygon()
+    # p.add_line(array((0.0, 0.4, 0.15, -0.05)))
+    # p.add_line(array((0.3320395938842,0.2892271257039, 0.2115759855531,0.626525229031)))
+    # p.add_line(array((-0.4760480959557,0.1311095656039, -0.3162727175992,0.7121109414457)))
+    # p.add_line(array((-0.2916018517206,0.3199053271587, 0.1102143253821,0.2009405687849)))
+    # p.add_line(array((-0.7731100796368,0.1230241779685, 0.2421012862217,0.3098906668697)))
+    # p.add_line(array((0.1, 0.1, 0.15, -0.05)))
 
+    for line in lines_data:
+        # p.add_line(line - (0.125, 0.5, 0.125, 0.5))
+        p.add_line(line - (0.4, 0.75, 0.4, 0.75))
+        # p.add_line(line - (0.65, 0.5, 0.65, 0.5))
 
-total_iterations = 0
-
-
-
-
-def trace_ray(bvh, origin, ray):
-    intersection = line_bvh.trace_line_bvh_v1(bvh, origin, ray, 10.0, False)
-    # Handle no intersection by adding virtual lines
-    if intersection.hit_line_id == 0xffffffff:
-        for i in range(4):
-            # [0, 0] => [1, 1] box
-            x0 = i & 1
-            y0 = (i >> 1) & 1
-            x1 = (i + 1) & 1
-            y1 = ((i + 1) >> 1) & 1
-
-            a = array((x0, y0)) - origin
-            dpt = array((x1, y1)) - array((x0, y0))
-            interval = ray_line_intersection_ro0(ray, a, dpt)
-
-            if interval >= 0 and interval <= 1:
-                intersection.hit_line_interval = interval
-                intersection_point = array((x0, y0)) + interval * dpt
-                intersection.hit_line_id = 0xffffffff - i
-                intersection.duv = intersection_point - origin
-                intersection.hit_dist_sq = intersection.duv[0]**2 + intersection.duv[1]**2
-                break
-    return intersection
-
-
-
-def binary_search_trace(origin, bvh, prev_end, new_start, max_iterations=1024):
-    vertices = []
-    while max_iterations > 0:
-        max_iterations -= 1
-        ray = prev_end[1] + new_start[1]
-        norm_factor = sqrt(ray[0]**2 + ray[1]**2)
-        ray /= norm_factor
-        # new_intersection = line_bvh.trace_line_bvh_v1(bvh, origin, ray, 10.0, False)
-        new_intersection = trace_ray(bvh, origin, ray)
-        global total_iterations
-        total_iterations += 1
-        if new_intersection.hit_line_id == prev_end[0].hit_line_id:
-            prev_end = (new_intersection, ray)
-        elif new_intersection.hit_line_id == new_start[0].hit_line_id:
-            new_start = (new_intersection, ray)
-        else:
-            # We've encountered a new line and need to split events
-            new_prev_end = (new_intersection, ray)
-            vertices.extend(
-                binary_search_trace(origin, bvh, prev_end, new_prev_end, max_iterations)
-            )
-            prev_end = new_prev_end
-
-        # Realistically hit our limit 
-        if norm_factor >= 1.99999988079:
-            break
-
-    # We should just need to detect if events (not simply lines) intersect, if they do, insert
-    # the intersection as a vertex.
-    # If they do not intersect, project a ray from the closer hit hit backwards
-    # and insert either (A, intersection), (intersection, B) ?
-    #
-    # For now, we're just going to be hacky and store the intersection positions
-    vertices.append(origin + prev_end[0].duv)
-    vertices.append(origin + new_start[0].duv)
-    return vertices
-
-
-
-def construct_visibility_mesh(origin, bvh, lines):
-
-    thetas_0 = arctan2(lines[:,1] - origin[1], lines[:,0] - origin[0])
-    thetas_1 = arctan2(lines[:,3] - origin[1], lines[:,3] - origin[0])
-    thetas = concatenate((thetas_0, thetas_1))
-    # Adding extra rays just to deal with the possibility of missing a vertex
-    thetas = concatenate((thetas, thetas + 1e-10, thetas - 1e-10))
-    thetas.sort()
-    thetas = unique(thetas)
-
-    rays = column_stack((cos(thetas), sin(thetas)))
-
-    intersections = [
-        # (line_bvh.trace_line_bvh_v1(bvh, origin, ray, 10.0, False), ray)
-        (trace_ray(bvh, origin, ray), ray)
-        for ray in rays
-    ]
-
-
-    # Only keep start end events, which mark the transition between line segments.
-    # at the moment we're not handling "holes", but really should.
-    #
-    # As a side note, given the set of lines that intersect, we could create a mini bvh
-    # on per light basis, although that doesn't seem massively scalable.
-    intersection_events = []
-
-    for i in range(len(intersections)):
-        if intersections[i][0].hit_line_id != intersections[i-1][0].hit_line_id:
-            intersection_events.append((intersections[i-1], intersections[i]))
-
-    vertices = []
-    for prev_end, new_start in intersection_events:
-        vertices.extend(
-            binary_search_trace(origin, bvh, prev_end, new_start)
-        )
-
-    # Remove degenerate vertices
-    i = 0
-    while i < len(vertices):
-        a = vertices[i]
-        b = vertices[i - 1]
-        dab = b - a
-        if dot(dab, dab) < 1e-7:
-            vertices[i-1] = (vertices[i-1] + vertices[i]) * 0.5
-            vertices.pop(i)
-            continue
-        i += 1
-
-    # Remove degenerate triangles
-    i = 0
-    while i < len(vertices):
-        a = vertices[i]
-        b = vertices[i - 2]
-        dab = b - a
-        if dot(dab, dab) < 1e-7:
-            vertices[i-2] = (vertices[i-2] + vertices[i]) * 0.5
-            vertices.pop(i)
-            vertices.pop(i-1)
-            i -= 1
-            if i < 0:
-                i = 0
-            continue
-        i += 1
-
-    # Add a pass to make segments which basically make up the same line
-    # continous
-
-    queued_indices = list(range(len(vertices)))
-    index_buffer = []
-
-
-    while len(queued_indices) > 2:
-
-        i = 0
-        while i < len(queued_indices):
-            ia = queued_indices[i - 1]
-            ib = queued_indices[i]
-            ic = queued_indices[(i + 1) % len(queued_indices)]
-            a = vertices[ia]
-            b = vertices[ib]
-            c = vertices[ic]
-
-            # Stay on the correct side
-            N = array((b[1] - a[1], a[0] - b[0]))
-            w = dot(N, b)
-            if (dot(N, c) - w) < 0:
-
-                # Make sure a->c doesn't intersect with anything
-                ok = True
-                ca = c - a
-                for j in range(len(vertices)):
-                    cmpa = vertices[j - 1]
-                    cmpb = vertices[j]
-                    interval = line_line_intersection(a, ca, cmpa, cmpb-cmpa)
-                    if interval > (1e-10) and interval < (1 - 1e-10):
-                        ok = False
-                        break
-
-                if ok:
-                    index_buffer.append((ia, ib, ic))
-                    queued_indices.pop(i)
-                    continue
-
-            i += 1
-            # print(len(queued_indices))
-
-
-            # if(len(queued_indices) < 3):
-            #     break
-            # if len(queued_indices) == 3:
-            #     queued_indices = []
-
-        # if len(queued_indices) == 4:
-        #     print("{{{0}}}".format(
-        #         ",".join(
-        #             "({0[0]:f},{0[1]:f})".format(vertices[queued_indices[i]])
-        #             for i in range(len(queued_indices))
-        #         )
-        #     ))
-        #     exit()
-
-
-
-    lines_debug = []
-    for i in range(len(vertices)):
-        lines_debug.append((vertices[i-1][0], vertices[i-1][1], vertices[i][0], vertices[i][1]))
-
-    lines_debug = []
-    for a, b, c in index_buffer:
-        a = vertices[a]
-        b = vertices[b]
-        c = vertices[c]
-        lines_debug.append((a[0], a[1], b[0], b[1]))
-        lines_debug.append((b[0], b[1], c[0], c[1]))
-        lines_debug.append((c[0], c[1], a[0], a[1]))
-
-
-    # lines_debug = [
-    #     (
-    #         event[0].line[0],
-    #         event[0].line[1],
-    #         event[0].line[0] - event[0].line[2],
-    #         event[0].line[1] - event[0].line[3]
-    #     )
-    #     for event, _ in intersection_events
-    # ]
     print("{{{0}}}".format(
         ",".join(
-            "segment(({0[0]:f},{0[1]:f}),({0[2]:f},{0[3]:f}))".format(line)
-            for line in lines_debug
+            "vector(({0[0]:f},{0[1]:f}),({1[0]:f},{1[1]:f}))".format(v.pos, v.child.pos)
+            # "vertex(({0},{1}))".format(v.pos, v.child.pos)
+            for v in p.get_vertices()
         )
     ))
-
-    # for a, b in intersection_events:
-        # print(a[0].hit_line_id, b[0].hit_line_id)
-        # print(a[2], b[2])
-    # print(sorted(a[0].hit_line_id for a, b in intersection_events))
-
-
-
-
-
-if __name__ == "__main__":
-
-    bvh = line_bvh.build_line_bvh_v1(lines_data)
-    # origin = array((0.125, 0.5))
-    # origin = array((0.4, 0.75))
-    # origin = array((0.65, 0.5))
-    # origin = array((0.55, 0.25))
-    origin = array((0.4,0.57))
-    construct_visibility_mesh(origin, bvh, lines_data)
-    print(total_iterations)
