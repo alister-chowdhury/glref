@@ -31,6 +31,13 @@ Which is split via:
 
 If there is only one leaf, it is guaranteed to be in A, to make
 subsequent distance tests simpler, in a shader.
+
+
+The total number of BVH entries approaches `num_lines`.
+wrt the bboxes, which act like mipmaps: (1 + 1/2 + 1/4 + 1/8 ...) ~= 2
+However because we store two lines per leaf entry, this in turn becomes one.
+
+
 """
 
 from numpy import *

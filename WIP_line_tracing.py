@@ -49,6 +49,12 @@ _DRAW_V1_TRACE_TEST_PROGRAM = viewport.make_permutation_program(
     GL_FRAGMENT_SHADER = line_bvh.V1_TRACING_TEST_FRAG
 )
 
+_DRAW_V1_DF_GENERATION_PROGRAM = viewport.make_permutation_program(
+    _DEBUGGING,
+    GL_VERTEX_SHADER = _DRAW_FULL_SCREEN_PATH,
+    GL_FRAGMENT_SHADER = line_bvh.V1_DF_GENERATION_FRAG
+)
+
 _DRAW_UNIFORM_PROBE_NEIGHBOUR_VISIBILITY = viewport.make_permutation_program(
     _DEBUGGING,
     GL_VERTEX_SHADER = _DRAW_FULL_SCREEN_PATH,
@@ -619,6 +625,14 @@ class Renderer(object):
             ))
             glBindTextureUnit(0, self._line_bvh_texture)
             glUniform2f(0, self._test_pos_x, self._test_pos_y)
+            glBindVertexArray(viewport.get_dummy_vao())
+            glDrawArrays(GL_TRIANGLES, 0, 3)
+        elif False:
+            glUseProgram(_DRAW_V1_DF_GENERATION_PROGRAM.get(
+                VS_OUTPUT_UV=0,
+                LINE_BVH_V1_LOC=0,
+            ))
+            glBindTextureUnit(0, self._line_bvh_texture)
             glBindVertexArray(viewport.get_dummy_vao())
             glDrawArrays(GL_TRIANGLES, 0, 3)
         elif False:

@@ -8,7 +8,7 @@ _SHADER_DIR = os.path.abspath(
 V1_DRAW_BVH_VERT = os.path.join(_SHADER_DIR, "v1_draw_bvh.vert")
 V1_DRAW_BVH_FRAG = os.path.join(_SHADER_DIR, "v1_draw_bvh.frag")
 V1_TRACING_TEST_FRAG = os.path.join(_SHADER_DIR, "v1_tracing_test.frag")
-
+V1_DF_GENERATION_FRAG = os.path.join(_SHADER_DIR, "v1_df_generation.frag")
 
 # Not good it turns out
 ANISO_DF_DOWNRES_FRAG = os.path.join(_SHADER_DIR, "aniso_df_downres.frag")

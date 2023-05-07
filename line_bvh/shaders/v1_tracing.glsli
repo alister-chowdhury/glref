@@ -1,6 +1,8 @@
 #ifndef LINE_BVH_V1_TRACING_GLSLI
 #define LINE_BVH_V1_TRACING_GLSLI
 
+
+// Should be like log2(num_lines) ? for maximum occupancy
 #ifndef LINE_BVH_V1_STACK_SIZE
 #define LINE_BVH_V1_STACK_SIZE 16
 #endif // LINE_BVH_V1_STACK_SIZE
@@ -215,24 +217,11 @@ bool findNearestLineBvhV1EvalEntry(vec2 ro,
     {
         ++result.numLineIntersections;
 
-        // TODO: Faster method:
         // https://www.geogebra.org/calculator/aajzrdep
-        vec2 Ld = -data.zw;
-        vec2 Ln = normalize(vec2(Ld.y, -Ld.x));
-        vec2 L0 = data.xy - ro;
-        vec2 L1 = L0 + Ld;
-        float Lw = dot(Ln, L0);
-        vec2 nearestPoint = Ln * Lw;
-
-        // Clamp the point to the line ends
-        if(dot(L0 - nearestPoint, -Ld) < 0)
-        {
-            nearestPoint = L0;
-        }
-        else if(dot(L1 - nearestPoint, Ld) < 0)
-        {
-            nearestPoint = L1;
-        }
+        vec2 A = data.xy - ro;
+        vec2 AB = data.zw;
+        float t = max(0, min(1, dot(A, AB) / dot(AB, AB)));
+        vec2 nearestPoint = A - AB * t;
 
         float nearestDistSq = dot(nearestPoint, nearestPoint);
 
