@@ -2,7 +2,8 @@
 #define LINE_BVH_V1_TRACING_GLSLI
 
 
-// Should be like log2(num_lines) ? for maximum occupancy
+// Should be like log2(num_lines) + 1 for maximum occupancy
+// assuming a mostly perfect binary tree.
 #ifndef LINE_BVH_V1_STACK_SIZE
 #define LINE_BVH_V1_STACK_SIZE 16
 #endif // LINE_BVH_V1_STACK_SIZE

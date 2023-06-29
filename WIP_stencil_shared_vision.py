@@ -363,6 +363,7 @@ class Renderer(object):
 
         self._line_maps_baked = False
         self._lights_baked = False
+        self._written_fov = False
 
     def run(self):
         self.window.run()
@@ -639,6 +640,14 @@ class Renderer(object):
         #     0.030371951072,0.18523100742,-0.6129894535719,-0.3110763618748
         # ], dtype=numpy.float32)
 
+        # Stress
+        if False:
+            import random
+            self.players = [
+                [random.random() * 2 - 1, random.random() * 2 - 1]
+                for _ in range(100)
+            ]
+
         self.num_lines = len(lines_data) // 4
 
         self._line_texture_ptr = ctypes.c_int()
@@ -868,16 +877,20 @@ class Renderer(object):
     def _draw(self, wnd):
 
         # FOW update
-        glViewport(0, 0, 512, 512)
+        glViewport(0, 0, FOG_OF_WAR_RESOLUTION, FOG_OF_WAR_RESOLUTION)
         with self._fow_fb.bind():
             # Set the depth to 0 for any previously visible cells, causing
             # the depth test to fail on subsequent occlusion draws
             glStencilMask(0xFF)
             glClear(GL_DEPTH_BUFFER_BIT | GL_STENCIL_BUFFER_BIT)
 
-            glUseProgram(self._draw_fow_init_program)
-            glBindTextureUnit(0, self._fow_history_fb_col.value)
-            self.triangle_screen.draw()
+            if self._written_fov:
+                glUseProgram(self._draw_fow_init_program)
+                glBindTextureUnit(0, self._fow_history_fb_col.value)
+                self.triangle_screen.draw()
+            else:
+                glDisable(GL_DEPTH_TEST)
+
 
             # Draw occlusion
 
@@ -900,6 +913,8 @@ class Renderer(object):
                 glUniform3f(0, player[0], player[1], depth)
                 glDrawArrays(GL_TRIANGLES, 0, self.num_lines * 9)
             
+            if not self._written_fov:
+                glEnable(GL_DEPTH_TEST)
             glDepthMask(GL_TRUE)
 
         # FOW write back to history
@@ -910,6 +925,7 @@ class Renderer(object):
             glStencilFunc(GL_NOTEQUAL, len(self.players), 0xFF)
             glStencilOp(GL_KEEP, GL_KEEP, GL_KEEP)
             self.triangle_screen.draw()
+            self._written_fov = True
 
 
         # Generate light shadow maps

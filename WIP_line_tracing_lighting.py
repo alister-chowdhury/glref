@@ -22,6 +22,14 @@ _DRAW_FULL_SCREEN_PATH = os.path.join(
     _SHADER_DIR, "draw_full_screen.vert"
 )
 
+_DRAW_SHARED_VISION_PROGRAM = viewport.make_permutation_program(
+    _DEBUGGING,
+    GL_VERTEX_SHADER = os.path.join(
+        _SHADER_DIR,
+        "stencil_shared_vision_generate_shadow.vert"
+    )
+)
+
 _GEN_PLANE_MAPS_FULL_PROGRAM = viewport.make_permutation_program(
     _DEBUGGING,
     GL_VERTEX_SHADER = _DRAW_FULL_SCREEN_PATH,
@@ -90,6 +98,7 @@ class Renderer(object):
         self._use_obbox = 0
         self._fullscreen_draw_lights = 0
         self._draw_pl_bbox = 0
+        self._filter_vision = 0
         self._test_pos_x = 0.5
         self._test_pos_y = 0.5
 
@@ -279,6 +288,28 @@ class Renderer(object):
             self._line_bvh_data.tobytes()
         )
 
+        self.num_lines = len(lines_data)
+        self._line_texture_ptr = ctypes.c_int()
+        glCreateTextures(GL_TEXTURE_1D, 1, self._line_texture_ptr)
+        self._line_texture = self._line_texture_ptr.value
+
+        glTextureParameteri(self._line_texture, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE)
+        glTextureParameteri(self._line_texture, GL_TEXTURE_MIN_FILTER, GL_NEAREST )
+        glTextureParameteri(self._line_texture, GL_TEXTURE_MAG_FILTER, GL_NEAREST )
+
+        glTextureStorage1D(
+            self._line_texture,
+            1,
+            GL_RGBA32F,
+            self.num_lines
+        )
+        glTextureSubImage1D(
+            self._line_texture, 0, 0,
+            self.num_lines,
+            GL_RGBA, GL_FLOAT,
+            lines_data * 2 - 1
+        )
+
         lights = [
             line_bvh.plv1.PointLightData(
                 (0.125, 0.5),
@@ -451,22 +482,49 @@ class Renderer(object):
         glBlendFunc(GL_ONE, GL_ZERO)
 
     def _draw(self, wnd):
-        glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT)
+        glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT | GL_STENCIL_BUFFER_BIT)
+
+        glDisable(GL_STENCIL_TEST)
 
         if self._regen_every_frame:
             self._generate_plane_maps_full()
 
         glViewport(0, 0, wnd.width, wnd.height)
 
+
+        # Without filtering vision this wouldn't be scalable
+        if self._filter_vision:
+            glEnable(GL_STENCIL_TEST)
+            glDisable(GL_BLEND)
+            glDisable(GL_DEPTH_TEST)
+
+            glStencilMask(0xFF)
+            glUseProgram(_DRAW_SHARED_VISION_PROGRAM.get(NO_WORLD_TO_CLIP=1))            
+            glBindTextureUnit(0, self._line_texture)
+
+            glStencilOp(GL_REPLACE, GL_REPLACE, GL_REPLACE)
+            glBindVertexArray(viewport.get_dummy_vao())
+            glStencilFunc(GL_ALWAYS, 1, 1)
+            glUniform3f(0, self._test_pos_x * 2 - 1, self._test_pos_y * 2 - 1, 0)
+            glDrawArrays(GL_TRIANGLES, 0, self.num_lines * 9)
+            
+            glStencilOp(GL_KEEP, GL_KEEP, GL_KEEP)
+            glStencilFunc(GL_NOTEQUAL, 1, 0xFF)
+
         if self._fullscreen_draw_lights:
             self._drawlights_fullscreen()
         else:
             self._drawlights()
 
+        glDisable(GL_STENCIL_TEST)
+        glDisable(GL_BLEND)
+        glDisable(GL_DEPTH_TEST)
+
         glUseProgram(_DRAW_V1_LINE_BVH_PROGRAM.get(ONLY_LINES=1))
         glBindTextureUnit(0, self._line_bvh_texture)
         glBindVertexArray(viewport.get_dummy_vao())
         glDrawArrays(GL_LINES, 0, self._line_bvh_num_nodes * 16)
+
 
         if self._draw_pl_bbox:
             if self._use_obbox:
@@ -480,6 +538,7 @@ class Renderer(object):
                 glBindTextureUnit(0, self._light_bbox_texture)
                 glBindVertexArray(viewport.get_dummy_vao())
                 glDrawArrays(GL_LINES, 0, self._num_lights * 8)
+
 
         self.timer_overlay.update(wnd.width, wnd.height)
         wnd.redraw()
@@ -497,6 +556,8 @@ class Renderer(object):
             self._draw_pl_bbox ^= 1
         elif key == b'r':
             self._regen_every_frame ^= 1
+        elif key == b'f':
+            self._filter_vision ^= 1
         wnd.redraw()
 
     def _drag(self, wnd, x, y, button):
