@@ -78,7 +78,21 @@ _DRAW_LIGHTS_FULLSCREEN_PROGRAM = viewport.make_permutation_program(
     GL_FRAGMENT_SHADER = line_bvh.plv1.DRAW_LIGHTS_FRAG
 )
 
+_DRAW_LIGHTLIST_PROGRAM = viewport.make_permutation_program(
+    _DEBUGGING,
+    GL_VERTEX_SHADER = _DRAW_FULL_SCREEN_PATH,
+    GL_FRAGMENT_SHADER = line_bvh.plv1.DRAW_LIGHTLIST_FRAG
+)
+
+
+_DRAW_LIGHTS_LIGHTLIST_PROGRAM = viewport.make_permutation_program(
+    _DEBUGGING,
+    GL_VERTEX_SHADER = _DRAW_FULL_SCREEN_PATH,
+    GL_FRAGMENT_SHADER = line_bvh.plv1.DRAW_LIGHTS_LIGHTLIST_FRAG
+)
+
 LINE_PLANEMAP_RESOLUTION = 512
+TILED_LIGHTLIST_DOWNSIZE = 32
 
 class Renderer(object):
 
@@ -101,6 +115,8 @@ class Renderer(object):
         self._filter_vision = 0
         self._test_pos_x = 0.5
         self._test_pos_y = 0.5
+        self._enable_light_move = 0
+        self._use_lightlists = 0 # VERY VERY BROKEN
 
         self.timer_overlay = perf_overlay_lib.TimerSamples256Overlay()
 
@@ -310,7 +326,7 @@ class Renderer(object):
             lines_data * 2 - 1
         )
 
-        lights = [
+        self.lights = [
             line_bvh.plv1.PointLightData(
                 (0.125, 0.5),
                 10.0,
@@ -331,7 +347,7 @@ class Renderer(object):
 
         # num_rand_lights = 100
         # max_intensity = min(1, 10 / num_rand_lights)
-        # lights = [
+        # self.lights = [
         #     line_bvh.plv1.PointLightData(
         #         (random.random() * 0.5 + 0.25, random.random() * 0.5 + 0.25),
         #         1.0 + random.random()*10,
@@ -340,7 +356,7 @@ class Renderer(object):
         #     for _ in range(num_rand_lights)
         # ]
 
-        self._num_lights = len(lights)
+        self._num_lights = len(self.lights)
 
         light_data_texture_ptr = ctypes.c_int()
         glCreateTextures(GL_TEXTURE_1D, 1, light_data_texture_ptr)
@@ -354,7 +370,7 @@ class Renderer(object):
             self._num_lights,
             GL_RGBA_INTEGER,
             GL_UNSIGNED_INT,
-            line_bvh.plv1.PointLightData.pack_stream(lights).tobytes()
+            line_bvh.plv1.PointLightData.pack_stream(self.lights).tobytes()
         )
 
         light_planemap_ptr = ctypes.c_int()
@@ -402,8 +418,57 @@ class Renderer(object):
             0
         )
 
+        self._num_tile_pixels = (self._num_lights + 127) // 128
+        self._light_tiles_bitmask = viewport.FramebufferTarget(GL_RGBA32UI, True)
+        self._light_tiles_fb = viewport.Framebuffer(
+            (self._light_tiles_bitmask,),
+            (wnd.width + TILED_LIGHTLIST_DOWNSIZE) // TILED_LIGHTLIST_DOWNSIZE * self._num_tile_pixels,
+            (wnd.height + TILED_LIGHTLIST_DOWNSIZE) // TILED_LIGHTLIST_DOWNSIZE
+        )
+
         self._generate_plane_maps_full()
         glViewport(0, 0, wnd.width, wnd.height)
+
+
+    def _generate_lightlist_maps(self, wnd):
+        num_tiles_x = (wnd.width + TILED_LIGHTLIST_DOWNSIZE) // TILED_LIGHTLIST_DOWNSIZE
+        num_tiles_y = (wnd.height + TILED_LIGHTLIST_DOWNSIZE) // TILED_LIGHTLIST_DOWNSIZE
+        light_map_width = num_tiles_x * self._num_tile_pixels
+        light_map_height = num_tiles_y
+        glViewport(0, 0, light_map_width, light_map_height)
+        with self._light_tiles_fb.bind():
+            glUseProgram(_DRAW_LIGHTLIST_PROGRAM.get(
+                USE_OBBOX=self._use_obbox
+            ))
+            if self._use_obbox:
+                glBindTextureUnit(0, self._light_obbox_texture)
+            else:
+                glBindTextureUnit(0, self._light_bbox_texture)
+            glUniform2ui(0, self._num_lights, self._num_tile_pixels)
+            glUniform4f(1, 2.0 / num_tiles_x, 2.0 / num_tiles_y, -1.0, -1.0)
+            glBindVertexArray(viewport.get_dummy_vao())
+            glDrawArrays(GL_TRIANGLES, 0, 3)
+
+    def _drawlights_lightlist(self):
+        glEnable(GL_BLEND)
+        glDisable(GL_CULL_FACE)
+        glDisable(GL_DEPTH_TEST)
+        glBlendEquation(GL_FUNC_ADD)
+        glBlendFunc(GL_ONE, GL_ONE)
+        glUseProgram(_DRAW_LIGHTS_LIGHTLIST_PROGRAM.get(
+            VS_OUTPUT_UV=0,
+            FLICKERING_POINT_LIGHTS=0,
+            USE_OBBOX=self._use_obbox
+        ))
+        glBindTextureUnit(0, self._light_data_texture)
+        glBindTextureUnit(1, self._light_planemap)
+        glBindTextureUnit(2, self._light_tiles_bitmask.texture)
+        glUniform3ui(0, TILED_LIGHTLIST_DOWNSIZE, TILED_LIGHTLIST_DOWNSIZE, self._num_tile_pixels)
+        glUniform1f(1, 1.0 / self._num_lights)
+        glBindVertexArray(viewport.get_dummy_vao())
+        glDrawArrays(GL_TRIANGLES, 0, 6 * self._num_lights)
+        glBlendFunc(GL_ONE, GL_ZERO)
+
 
     def _generate_plane_maps_full(self):
         glDisable(GL_BLEND)
@@ -489,6 +554,9 @@ class Renderer(object):
         if self._regen_every_frame:
             self._generate_plane_maps_full()
 
+        if self._use_lightlists:
+            self._generate_lightlist_maps(wnd)
+
         glViewport(0, 0, wnd.width, wnd.height)
 
 
@@ -511,6 +579,8 @@ class Renderer(object):
             glStencilOp(GL_KEEP, GL_KEEP, GL_KEEP)
             glStencilFunc(GL_NOTEQUAL, 1, 0xFF)
 
+        if self._use_lightlists:
+            self._drawlights_lightlist()
         if self._fullscreen_draw_lights:
             self._drawlights_fullscreen()
         else:
@@ -546,6 +616,10 @@ class Renderer(object):
 
     def _resize(self, wnd, width, height):
         glViewport(0, 0, width, height)
+        self._light_tiles_fb.resize(
+            (wnd.width + TILED_LIGHTLIST_DOWNSIZE) // TILED_LIGHTLIST_DOWNSIZE * self._num_tile_pixels,
+            (wnd.height + TILED_LIGHTLIST_DOWNSIZE) // TILED_LIGHTLIST_DOWNSIZE
+        )
 
     def _keypress(self, wnd, key, x, y):
         if key == b'o':
@@ -558,6 +632,10 @@ class Renderer(object):
             self._regen_every_frame ^= 1
         elif key == b'f':
             self._filter_vision ^= 1
+        elif key == b'l':
+            self._enable_light_move ^= 1
+        elif key == b'q':
+            self._use_lightlists ^= 1
         wnd.redraw()
 
     def _drag(self, wnd, x, y, button):
@@ -565,6 +643,22 @@ class Renderer(object):
         deriv_v = y / wnd.height
         self._test_pos_x += deriv_u
         self._test_pos_y += -deriv_v
+
+        if self._enable_light_move:
+            self.lights[0] = line_bvh.plv1.PointLightData(
+                (self._test_pos_x, self._test_pos_y),
+                10.0,
+                (1.0, 1.0, 1.0)
+            )
+            glTextureSubImage1D(
+                self._light_data_texture, 0, 0,
+                self._num_lights,
+                GL_RGBA_INTEGER,
+                GL_UNSIGNED_INT,
+                line_bvh.plv1.PointLightData.pack_stream(self.lights).tobytes()
+            )
+            self._generate_plane_maps_full()
+
         wnd.redraw()
 
 if __name__ == "__main__":

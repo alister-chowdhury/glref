@@ -27,6 +27,12 @@ layout(location=0) out vec4 outCol;
 #endif // OUTPUT_CIRCULAR_HARMONICS
 
 
+
+// only PLANE_BLOCKING_MODE_BINARY_LINEAR and
+//      PLANE_BLOCKING_MODE_SMOOTH_LINEAR and   <--- maybe not?
+//      PLANE_BLOCKING_MODE_BINARY_TWOTAP_PCF
+//      please 
+
 #define PLANE_BLOCKING_MODE_SMOOTH_LINEAR       0
 #define PLANE_BLOCKING_MODE_BINARY_LINEAR       1
 #define PLANE_BLOCKING_MODE_BINARY_TWOTAP       2
@@ -116,7 +122,7 @@ void main()
 
 #else // OUTPUT_CIRCULAR_HARMONICS
 
-    outCol = vec4(evaluatedColour, 1.0);
+    outCol = vec4(evaluatedColour, 0.0);
 
 #endif // OUTPUT_CIRCULAR_HARMONICS
 

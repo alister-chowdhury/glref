@@ -13,10 +13,12 @@ GEN_OBBOX_FROM_PLANE_MAP_FRAG = os.path.join(_SHADER_DIR, "gen_obbox_from_plane_
 DRAW_BBOX_VERT = os.path.join(_SHADER_DIR, "draw_bbox.vert")
 DRAW_OBBOX_VERT = os.path.join(_SHADER_DIR, "draw_obbox.vert")
 DRAW_BBOX_FRAG = os.path.join(_SHADER_DIR, "draw_bbox.frag")
+DRAW_LIGHTLIST_FRAG = os.path.join(_SHADER_DIR, "draw_lightlist.frag")
 
 DRAW_LIGHTS_VERT = os.path.join(_SHADER_DIR, "draw_lights.vert")
 DRAW_LIGHTS_FRAG = os.path.join(_SHADER_DIR, "draw_lights.frag")
 DRAW_LIGHTS_FULLSCREEN_VERT = os.path.join(_SHADER_DIR, "draw_lights_fullscreen.vert")
+DRAW_LIGHTS_LIGHTLIST_FRAG = os.path.join(_SHADER_DIR, "draw_lights_lightlist.frag")
 
 
 def pack_r11g11b10(value):

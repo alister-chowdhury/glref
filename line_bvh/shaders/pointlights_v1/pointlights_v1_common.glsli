@@ -121,6 +121,8 @@ vec3 evaluatePointLightContrib(float dist, vec3 col, float decayRate)
 // https://www.geogebra.org/calculator/kshrzucz
 float getSmoothPlaneVisibility(vec2 uv, vec3 sampledNormalAndDistance)
 {
+    const float bias = (1.0 / 512.0);
+    sampledNormalAndDistance.z += bias;
     float invLength = inversesqrt(dot(sampledNormalAndDistance.xy,
                                       sampledNormalAndDistance.xy));
     
@@ -138,7 +140,8 @@ float getSmoothPlaneVisibility(vec2 uv, vec3 sampledNormalAndDistance)
 
 float getBinaryPlaneVisibility(vec2 uv, vec3 sampledNormalAndDistance)
 {
-    return float(dot(uv, sampledNormalAndDistance.xy) < sampledNormalAndDistance.z);
+    const float bias = (1.0 / 512.0);
+    return float(dot(uv, sampledNormalAndDistance.xy) <= (sampledNormalAndDistance.z + bias));
 }
 
 

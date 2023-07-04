@@ -262,7 +262,7 @@ class Renderer(object):
 
     def __init__(self):
 
-        self.window = viewport.Window(512, 512)
+        self.window = viewport.Window(300, 300)
 
         self.window.on_init = self._init
         self.window.on_draw = self._draw
