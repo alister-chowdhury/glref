@@ -1,0 +1,204 @@
+#version 460 core
+
+#define THREADSIZE 64
+
+layout(local_size_x=64) in;
+
+
+#include "common.glsli"
+
+
+layout(set=0, binding = 0) uniform GlobalParameters_
+{
+    GlobalParameters globals;
+}; 
+
+
+
+// SHOULD BE IN ANOTHER SET FOR VULKAN THINGS
+readonly layout (r8ui, binding = 1)  uniform uimage2D mapAtlas;
+writeonly layout(std430, binding = 2) buffer outNumLines_ { uint outNumLines[]; };
+writeonly layout(std430, binding = 3) buffer outLines_ { vec4 outLines[]; };
+
+
+#define INVALID_INDEX 0xffffffff
+
+
+shared uint drawAllocator;
+
+void main()
+{
+    uint tid = gl_LocalInvocationID.x;
+
+    uint width = 128u;
+    uint height = 128u;
+    float invWidth = 1.0 / float(width);
+    float invHeight = 1.0 / float(height);
+
+    if(tid == 0u)
+    {
+        drawAllocator = 0u;
+    }
+    barrier();
+
+    // Horizonal pass
+    for(uint yi=1; yi<(height-1); yi+=THREADSIZE)
+    {
+        uint y = yi + tid;
+        if(y < (height - 1))
+        {
+            float yf = float(y + 1) * invHeight;
+            uint lineStartTop = INVALID_INDEX;
+            uint lineStartBottom = INVALID_INDEX;
+            for(uint x=1; x<(width-1); ++x)
+            {
+                bool topHidden = (imageLoad(mapAtlas, ivec2(x, y+1)).x == 0u);
+                bool middleHidden = (imageLoad(mapAtlas, ivec2(x, y)).x == 0u);
+                bool bottomHidden = (imageLoad(mapAtlas, ivec2(x, y-1)).x == 0u);
+                
+                if((!topHidden) && middleHidden)
+                {
+                    if(lineStartTop == INVALID_INDEX)
+                    {
+                        lineStartTop = x;
+                        
+                        // Keep the lines airtight
+                        if(imageLoad(mapAtlas, ivec2(x-1, y)).x == 0u)
+                        {
+                            lineStartTop -= 1;
+                        }
+                    }
+                }
+                else if(lineStartTop != INVALID_INDEX)
+                {
+                    uint writeId = atomicAdd(drawAllocator, 1u);
+                    outLines[writeId] = vec4(float(lineStartTop) * invWidth,
+                                             yf,
+                                             // Keep the lines airtight
+                                             float(x + uint(middleHidden)) * invWidth,
+                                             yf);
+                    lineStartTop = INVALID_INDEX;
+                }
+
+                if((!bottomHidden) && middleHidden)
+                {
+                    if(lineStartBottom == INVALID_INDEX)
+                    {
+                        lineStartBottom = x;
+
+                        // Keep the lines airtight
+                        if(imageLoad(mapAtlas, ivec2(x-1, y)).x == 0u)
+                        {
+                            lineStartBottom -= 1;
+                        }
+                    }
+                }
+                else if(lineStartBottom != INVALID_INDEX)
+                {
+                    uint writeId = atomicAdd(drawAllocator, 1u);
+                    outLines[writeId] = vec4(float(lineStartBottom) * invWidth,
+                                             yf,
+                                             // Keep the lines airtight
+                                             float(x + uint(middleHidden)) * invWidth,
+                                             yf);
+                    lineStartBottom = INVALID_INDEX;
+                }
+            }
+
+            if(lineStartTop != INVALID_INDEX)
+            {
+                uint writeId = atomicAdd(drawAllocator, 1u);
+                outLines[writeId] = vec4(float(lineStartTop) * invWidth,
+                                         yf,
+                                         1.0,
+                                         yf);
+            }
+            if(lineStartBottom != INVALID_INDEX)
+            {
+                uint writeId = atomicAdd(drawAllocator, 1u);
+                outLines[writeId] = vec4(float(lineStartBottom) * invWidth,
+                                         yf,
+                                         1.0,
+                                         yf);
+            }
+        }
+    }
+
+    // Vertical pass
+    for(uint xi=1; xi<(width-1); xi+=THREADSIZE)
+    {
+        uint x = xi + tid;
+        if(x < (width - 1))
+        {
+            float xlf = float(x) * invWidth;
+            float xrf = float(x + 1) * invWidth;
+            uint lineStartLeft = INVALID_INDEX;
+            uint lineStartRight = INVALID_INDEX;
+            for(uint y=1; y<height; ++y)
+            {
+                bool leftHidden = (imageLoad(mapAtlas, ivec2(x-1, y)).x == 0u);
+                bool middleHidden = (imageLoad(mapAtlas, ivec2(x, y)).x == 0u);
+                bool rightHidden = (imageLoad(mapAtlas, ivec2(x+1, y)).x == 0u);
+                
+                if((!leftHidden) && middleHidden)
+                {
+                    if(lineStartLeft == INVALID_INDEX)
+                    {
+                        lineStartLeft = y;
+                    }
+                }
+                else if(lineStartLeft != INVALID_INDEX)
+                {
+                    uint writeId = atomicAdd(drawAllocator, 1u);
+                    outLines[writeId] = vec4(xlf,
+                                             float(lineStartLeft) * invHeight,
+                                             xlf,
+                                             // Extend to meet with top wall
+                                             float(y + uint(middleHidden)) * invHeight);
+                    lineStartLeft = INVALID_INDEX;
+                }
+
+                if((!rightHidden) && middleHidden)
+                {
+                    if(lineStartRight == INVALID_INDEX)
+                    {
+                        lineStartRight = y;
+                    }
+                }
+                else if(lineStartRight != INVALID_INDEX)
+                {
+                    uint writeId = atomicAdd(drawAllocator, 1u);
+                    outLines[writeId] = vec4(xrf,
+                                             float(lineStartRight) * invHeight,
+                                             xrf,
+                                             // Extend to meet with top wall
+                                             float(y + uint(middleHidden)) * invHeight);
+                    lineStartRight = INVALID_INDEX;
+                }
+            }
+
+            if(lineStartLeft != INVALID_INDEX)
+            {
+                uint writeId = atomicAdd(drawAllocator, 1u);
+                outLines[writeId] = vec4(xlf,
+                                         float(lineStartLeft) * invHeight,
+                                         xlf,
+                                         1.0);
+            }
+            if(lineStartRight != INVALID_INDEX)
+            {
+                uint writeId = atomicAdd(drawAllocator, 1u);
+                outLines[writeId] = vec4(xrf,
+                                         float(lineStartRight) * invHeight,
+                                         xrf,
+                                         1.0);
+            }
+        }
+    }
+    barrier();
+
+    if(tid == 0)
+    {
+        outNumLines[0] = drawAllocator * 2u;
+    }
+}

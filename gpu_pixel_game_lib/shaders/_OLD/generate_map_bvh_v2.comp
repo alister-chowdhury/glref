@@ -1,0 +1,490 @@
+#version 460 core
+
+
+/*
+
+New BVH layout:
+    still vec4x3, but rather than the type being BOX or LINE, it's
+    BOX or LINE_BUCKET.
+
+    We're sacrificing the lineId we would usually stash in
+    v0.y and v0.w
+    for a packed [offset:24, size:8].
+
+*/
+
+
+#define BUCKET_SIZE_DIM 8
+
+
+layout(local_size_x=BUCKET_SIZE_DIM, local_size_y=BUCKET_SIZE_DIM) in;
+
+
+#define BVH_V2_METADATA_BBOX            0
+#define BVH_V2_METADATA_LINE_BUCKET     1
+#define BVH_V2_NODE_FLOAT4_STRIDE       3
+
+
+#include "common.glsli"
+
+
+layout(set=0, binding = 0) uniform GlobalParameters_
+{
+    GlobalParameters globals;
+}; 
+
+
+// TODO: MOVE TO ANOTHER SET
+layout(set=0, binding=1) uniform GenerateBVHParams_
+{
+    GenerateBVHParams params;
+};
+
+
+readonly layout(std430, binding = 2) buffer inLines_ { vec4 inLines[]; };
+writeonly layout(std430, binding = 3) buffer outBVH_ { vec4 outBVH[]; };
+
+
+vec4 mergeBounds(vec4 a, vec4 b)
+{
+    a.xy = min(a.xy, b.xy);
+    a.zw = max(a.zw, b.zw);
+    return a;
+}
+
+
+float boundsArea(vec4 a)
+{
+    vec2 deriv = a.zw - a.xy;
+    return deriv.x * deriv.y;
+}
+
+
+struct BVHNodeEntry
+{
+    uint type;
+    uint offset;
+    vec4 bbox;
+    uint count;
+};
+
+shared uint bucketAllocator[BUCKET_SIZE_DIM * BUCKET_SIZE_DIM];
+shared uint bucketOffsets[BUCKET_SIZE_DIM * BUCKET_SIZE_DIM];
+shared vec4 bucketBBoxes[BUCKET_SIZE_DIM * BUCKET_SIZE_DIM];
+
+shared BVHNodeEntry nodeDataSwapA[(BUCKET_SIZE_DIM / 2) * (BUCKET_SIZE_DIM / 2)];
+shared BVHNodeEntry nodeDataSwapB[(BUCKET_SIZE_DIM / 4) * (BUCKET_SIZE_DIM / 4)];
+
+
+// Sort the BVH nodes in such a way that they are organised
+// in the order they should be merged
+uint sortBVHNodeEntries(inout BVHNodeEntry A,
+                        inout BVHNodeEntry B,
+                        inout BVHNodeEntry C,
+                        inout BVHNodeEntry D)
+{
+    uint numValid = uint(A.count > 0u)
+                    + uint(B.count > 0u)
+                    + uint(C.count > 0u)
+                    + uint(D.count > 0u);
+
+    // Do nothing
+    if(numValid == 0u) {}
+
+        // Move the only valid item to the front
+    else if(numValid == 1u)
+    {
+        BVHNodeEntry first;
+        if(A.count > 0u) { first = A; }
+        else if(B.count > 0u) { first = B; }
+        else if(C.count > 0u) { first = C; }
+        else if(D.count > 0u) { first = D; }
+        A = first;
+    }
+
+    // Move the two valid entries to the front
+    else if(numValid == 2u)
+    {
+        BVHNodeEntry first;
+        BVHNodeEntry second;
+        if(A.count > 0u)
+        {
+            first = A;
+            if(B.count > 0u) { second = B; }
+            else { second = (C.count > 0u) ? C : D; }
+        }
+        else if(B.count > 0u)
+        {
+            first = B;
+            second = (C.count > 0u) ? C : D;
+        }
+        else
+        {
+            first = C;
+            second = D;
+        }
+        A = first;
+        B = second;
+    }
+
+    else if(numValid == 3u)
+    {
+        BVHNodeEntry first;
+        BVHNodeEntry second;
+        BVHNodeEntry third;
+        if(A.count > 0u)
+        {
+            first = A;
+            if(B.count > 0u)
+            {
+                second = B;
+                third = (C.count > 0u) ? C : D;
+            }
+            else
+            {
+                second = C;
+                third = D;
+            }
+        }
+        else
+        {
+            first = B;
+            second = C;
+            third = D;
+        }
+
+        float ABarea = boundsArea(mergeBounds(first.bbox, second.bbox));
+        float ACarea = boundsArea(mergeBounds(first.bbox, third.bbox));
+        float BCarea = boundsArea(mergeBounds(second.bbox, third.bbox));
+
+        if(ABarea > ACarea)
+        {
+            // Swap A and C, so we get [C, B, A]
+            if(BCarea < ACarea)
+            {
+                BVHNodeEntry tmp = first;
+                first = third;
+                third = tmp;
+            }
+            // Swap B and C so we get [A, C, B]
+            else
+            {
+                BVHNodeEntry tmp = second;
+                second = third;
+                third = tmp;
+            }
+        }
+        else if(ABarea > BCarea)
+        {
+            // Swap A and C, so we get [C, B, A]
+            BVHNodeEntry tmp = first;
+            first = third;
+            third = tmp;
+        }
+
+        A = first;
+        B = second;
+        C = third;
+    }
+
+    else // (numValid == 4u)
+    {
+        // NB: we're only swapping [A B C D] to [A C B D]
+        float ABarea = boundsArea(mergeBounds(A.bbox, B.bbox));
+        float ACarea = boundsArea(mergeBounds(A.bbox, C.bbox));
+        float CDarea = boundsArea(mergeBounds(C.bbox, D.bbox));
+        float BDarea = boundsArea(mergeBounds(B.bbox, D.bbox));
+
+        // Swap B and C
+        if((ABarea + CDarea) > (ACarea + BDarea))
+        {
+            BVHNodeEntry tmp = B;
+            B = C;
+            C = B;
+        }
+    }
+
+    return numValid;
+}
+
+
+BVHNodeEntry createBVHSubtree(uint numEntries,
+                              uint bvhOffset,
+                              BVHNodeEntry A,
+                              BVHNodeEntry B,
+                              BVHNodeEntry C,
+                              BVHNodeEntry D)
+{
+    BVHNodeEntry finalEntry;
+
+    // No cells or a single valid one, in either case
+    // we can just propagate A up
+    if(numEntries <= 1u)
+    {
+        finalEntry = A;
+    }
+    else if(numEntries == 2u)
+    {
+        finalEntry.type = BVH_V2_METADATA_BBOX;
+        finalEntry.offset = bvhOffset;
+        finalEntry.bbox = mergeBounds(A.bbox, B.bbox);
+        finalEntry.count = A.count + B.count;
+        outBVH[bvhOffset] = uintBitsToFloat(uvec4(
+            A.type, A.offset, B.type, B.offset
+        ));
+        outBVH[bvhOffset+1] = A.bbox;
+        outBVH[bvhOffset+2] = B.bbox;
+    }
+    else if(numEntries == 3u)
+    {
+        vec4 ABBounds = mergeBounds(A.bbox, B.bbox);
+        outBVH[bvhOffset + BVH_V2_NODE_FLOAT4_STRIDE] = uintBitsToFloat(
+            uvec4(A.type, A.offset, B.type, B.offset)
+        );
+        outBVH[bvhOffset + BVH_V2_NODE_FLOAT4_STRIDE + 1] = A.bbox;
+        outBVH[bvhOffset + BVH_V2_NODE_FLOAT4_STRIDE + 2] = B.bbox;
+
+        outBVH[bvhOffset] = uintBitsToFloat(
+            uvec4(BVH_V2_METADATA_BBOX, bvhOffset + BVH_V2_NODE_FLOAT4_STRIDE,
+                  C.type, C.offset)
+        );
+        outBVH[bvhOffset + 1] = ABBounds;
+        outBVH[bvhOffset + 2] = C.bbox;
+
+        finalEntry.type = BVH_V2_METADATA_BBOX;
+        finalEntry.offset = bvhOffset;
+        finalEntry.bbox = mergeBounds(ABBounds, C.bbox);
+        finalEntry.count = A.count + B.count + C.count;
+    }
+
+    else // if(numEntries == 4u)
+    {
+        vec4 ABBounds = mergeBounds(A.bbox, B.bbox);
+        outBVH[bvhOffset + BVH_V2_NODE_FLOAT4_STRIDE * 2] = uintBitsToFloat(
+            uvec4(A.type, A.offset, B.type, B.offset)
+        );
+        outBVH[bvhOffset + BVH_V2_NODE_FLOAT4_STRIDE * 2 + 1] = A.bbox;
+        outBVH[bvhOffset + BVH_V2_NODE_FLOAT4_STRIDE * 2 + 2] = B.bbox;
+
+        vec4 CDBounds = mergeBounds(C.bbox, D.bbox);
+        outBVH[bvhOffset + BVH_V2_NODE_FLOAT4_STRIDE * 1] = uintBitsToFloat(
+            uvec4(C.type, C.offset, D.type, D.offset)
+        );
+        outBVH[bvhOffset + BVH_V2_NODE_FLOAT4_STRIDE * 1 + 1] = C.bbox;
+        outBVH[bvhOffset + BVH_V2_NODE_FLOAT4_STRIDE * 1 + 2] = D.bbox;
+
+        outBVH[bvhOffset] = uintBitsToFloat(
+            uvec4(BVH_V2_METADATA_BBOX, bvhOffset + BVH_V2_NODE_FLOAT4_STRIDE * 2,
+                  BVH_V2_METADATA_BBOX, bvhOffset + BVH_V2_NODE_FLOAT4_STRIDE * 1)
+        );
+        outBVH[bvhOffset + 1] = ABBounds;
+        outBVH[bvhOffset + 2] = CDBounds;
+
+        finalEntry.type = BVH_V2_METADATA_BBOX;
+        finalEntry.offset = bvhOffset;
+        finalEntry.bbox = mergeBounds(ABBounds, CDBounds);
+        finalEntry.count = A.count + B.count + C.count + D.count;
+    }
+
+    return finalEntry;
+}
+
+
+void main()
+{
+    uvec2 tid = gl_LocalInvocationID.xy;
+    uint bucketId = tid.y * BUCKET_SIZE_DIM + tid.x;
+    
+    vec4 captureBbox = vec4(tid, tid + 1u) / vec2(BUCKET_SIZE_DIM - 1, BUCKET_SIZE_DIM - 1).xyxy;
+    vec4 finalBbox = vec4(1e+20, 1e+20, -1e+20, -1e-20);
+    uint bucketCount = 0u;
+
+    uint firstLine = 0u;
+    uint endLine = 0u;
+
+    for(uint lineId = 0; lineId < params.numLines; ++lineId)
+    {
+        vec4 line = inLines[lineId];
+        vec2 center = (line.xy + line.zw) * 0.5;
+
+        if(all(greaterThanEqual(center.xy, captureBbox.xy))
+           && all(lessThan(center.xy, captureBbox.zw)))
+        {
+            if(bucketCount == 0)
+            {
+                firstLine = lineId;
+            }
+            endLine = lineId + 1u;
+            ++bucketCount;
+            finalBbox = mergeBounds(finalBbox,
+                                    vec4(min(line.xy, line.zw),
+                                         max(line.xy, line.zw)));
+        }
+    }
+    bucketAllocator[bucketId] = bucketCount;
+    bucketBBoxes[bucketId] = finalBbox;
+    barrier();
+
+    // TODO: Figure out the maximum amount of padding needed
+    //       so we can fit in connecting nodes.
+    uint bucketOffsetLevel0 = 0u;
+    uint bucketSizeLevel0 = 3u * BVH_V2_NODE_FLOAT4_STRIDE;
+    
+    uint bucketOffsetLevel1 = bucketOffsetLevel0 + bucketSizeLevel0;
+    uint bucketSizeLevel1 = 4u * bucketSizeLevel0;
+
+    uint bucketOffsetLevel2 = bucketOffsetLevel1 + bucketSizeLevel1;
+    uint bucketSizeLevel2 = 4u * bucketSizeLevel1;
+
+    uint bucketNodePrefix = bucketOffsetLevel2 + bucketSizeLevel2;
+
+    uint bucketOffset = bucketNodePrefix;
+    for(uint i = 0; i < bucketId; ++i)
+    {
+        bucketOffset += bucketAllocator[i];
+    }
+
+    bucketOffsets[bucketId] = bucketOffset;
+    barrier();
+
+    // Bottom level buckets, no internal sorting is done,
+    // lines are simply put in pairs and written out
+    //
+    {
+        uint written = 0;
+        for(uint lineId = firstLine; lineId < endLine; ++lineId)
+        {
+            vec4 line = inLines[lineId];
+            vec2 center = (line.xy + line.zw) * 0.5;
+
+            if(all(greaterThanEqual(center.xy, captureBbox.xy))
+               && all(lessThan(center.xy, captureBbox.zw)))
+            {
+                outBVH[bucketOffset + written++] = vec4(line.xy, line.xy - line.zw);
+            }
+        }
+    }
+
+// #define DEBUG_ALLOCATIONS 1
+#if DEBUG_ALLOCATIONS
+    if(tid.x == 0 && tid.y == 0)
+    {
+        outBVH[0] = vec4(bucketOffsetLevel0, bucketSizeLevel0, 0, 0);
+        outBVH[1] = vec4(bucketOffsetLevel1, bucketSizeLevel1, 0, 0);
+        outBVH[2] = vec4(bucketOffsetLevel2, bucketSizeLevel2, 0, 0);
+        outBVH[3] = vec4(bucketNodePrefix, 1, 2, 3);
+
+        for(uint i=0; i<(BUCKET_SIZE_DIM * BUCKET_SIZE_DIM); i+=4)
+        {
+            outBVH[4 + i/4] = vec4(bucketOffsets[i], bucketOffsets[i+1], bucketOffsets[i+2], bucketOffsets[i+3]);
+        }
+        // outBVH[4] = vec4(bucketOffsets[(BUCKET_SIZE_DIM * BUCKET_SIZE_DIM)-1], 0, 0, 10);
+    }
+    return;
+#endif // DEBUG_ALLOCATIONS
+
+
+    // 8x8 => [4x8 or 8x4] => [4x4]
+    ////
+    if(tid.x < BUCKET_SIZE_DIM/2 && tid.y < BUCKET_SIZE_DIM/2)
+    {
+        uint Aid = ((tid.y * 2u + 0u) * BUCKET_SIZE_DIM) + tid.x * 2u;
+        uint Bid = ((tid.y * 2u + 1u) * BUCKET_SIZE_DIM) + tid.x * 2u;
+        uint Cid = ((tid.y * 2u + 0u) * BUCKET_SIZE_DIM) + tid.x * 2u + 1u;
+        uint Did = ((tid.y * 2u + 1u) * BUCKET_SIZE_DIM) + tid.x * 2u + 1u;
+
+        uint localBucketId = (tid.y * BUCKET_SIZE_DIM/2) + tid.x;
+        uint bvhOffset = bucketOffsetLevel2 + (localBucketId * BVH_V2_NODE_FLOAT4_STRIDE);
+
+        BVHNodeEntry A;
+        A.type = BVH_V2_METADATA_LINE_BUCKET;
+        A.bbox = bucketBBoxes[Aid];
+        A.count = bucketAllocator[Aid];
+        A.offset = bucketOffsets[Aid] | (A.count << 24);
+
+        BVHNodeEntry B;
+        B.type = BVH_V2_METADATA_LINE_BUCKET;
+        B.bbox = bucketBBoxes[Bid];
+        B.count = bucketAllocator[Bid];
+        B.offset = bucketOffsets[Bid] | (B.count << 24);
+        
+        BVHNodeEntry C;
+        C.type = BVH_V2_METADATA_LINE_BUCKET;
+        C.bbox = bucketBBoxes[Cid];
+        C.count = bucketAllocator[Cid];
+        C.offset = bucketOffsets[Cid] | (C.count << 24);
+
+        BVHNodeEntry D;
+        D.type = BVH_V2_METADATA_LINE_BUCKET;
+        D.bbox = bucketBBoxes[Did];
+        D.count = bucketAllocator[Did];
+        D.offset = bucketOffsets[Did] | (D.count << 24);
+
+        uint numEntries = sortBVHNodeEntries(A, B, C, D);
+        nodeDataSwapA[localBucketId] = createBVHSubtree(numEntries,
+                                                        bvhOffset,
+                                                        A, B, C, D);
+    }
+    barrier();
+
+    // 4x4 => [2x4 or 4x2] => [2x2]
+    ////
+    if(tid.x < BUCKET_SIZE_DIM/4 && tid.y < BUCKET_SIZE_DIM/4)
+    {
+        uint Aid = ((tid.y * 2u + 0u) * (BUCKET_SIZE_DIM / 2u)) + tid.x * 2u;
+        uint Bid = ((tid.y * 2u + 1u) * (BUCKET_SIZE_DIM / 2u)) + tid.x * 2u;
+        uint Cid = ((tid.y * 2u + 0u) * (BUCKET_SIZE_DIM / 2u)) + tid.x * 2u + 1u;
+        uint Did = ((tid.y * 2u + 1u) * (BUCKET_SIZE_DIM / 2u)) + tid.x * 2u + 1u;
+
+        uint localBucketId = (tid.y * BUCKET_SIZE_DIM/4) + tid.x;
+        uint bvhOffset = bucketOffsetLevel1 + (localBucketId * BVH_V2_NODE_FLOAT4_STRIDE);
+
+        BVHNodeEntry A = nodeDataSwapA[Aid];
+        BVHNodeEntry B = nodeDataSwapA[Bid];
+        BVHNodeEntry C = nodeDataSwapA[Cid];
+        BVHNodeEntry D = nodeDataSwapA[Did];
+
+        uint numEntries = sortBVHNodeEntries(A, B, C, D);
+
+        nodeDataSwapB[localBucketId] = createBVHSubtree(numEntries,
+                                                        bvhOffset,
+                                                        A, B, C, D);
+    }
+    barrier();
+
+    // 2x2 => [1x2 or 2x1] => [1x1]
+    ////
+    if(tid.x < BUCKET_SIZE_DIM/8 && tid.y < BUCKET_SIZE_DIM/8)
+    {
+        uint Aid = ((tid.y * 2u + 0u) * (BUCKET_SIZE_DIM / 4u)) + tid.x * 2u;
+        uint Bid = ((tid.y * 2u + 1u) * (BUCKET_SIZE_DIM / 4u)) + tid.x * 2u;
+        uint Cid = ((tid.y * 2u + 0u) * (BUCKET_SIZE_DIM / 4u)) + tid.x * 2u + 1u;
+        uint Did = ((tid.y * 2u + 1u) * (BUCKET_SIZE_DIM / 4u)) + tid.x * 2u + 1u;
+
+        uint localBucketId = (tid.y * BUCKET_SIZE_DIM/8) + tid.x;
+        uint bvhOffset = bucketOffsetLevel0 + (localBucketId * BVH_V2_NODE_FLOAT4_STRIDE);
+
+        BVHNodeEntry A = nodeDataSwapB[Aid];
+        BVHNodeEntry B = nodeDataSwapB[Bid];
+        BVHNodeEntry C = nodeDataSwapB[Cid];
+        BVHNodeEntry D = nodeDataSwapB[Did];
+
+        uint numEntries = sortBVHNodeEntries(A, B, C, D);
+
+        // Since this is the root node, we HAVE to write an entry,
+        // evem if it's guff data.
+        if(numEntries < 2u)
+        {
+            B.type = BVH_V2_METADATA_LINE_BUCKET;
+            B.offset = 0u;
+            if(numEntries == 0u)
+            {
+                A.type = BVH_V2_METADATA_LINE_BUCKET;
+                A.offset = 0u;
+            }
+            numEntries = 2u;
+        }
+
+        createBVHSubtree(numEntries, bvhOffset, A, B, C, D);
+    }
+}

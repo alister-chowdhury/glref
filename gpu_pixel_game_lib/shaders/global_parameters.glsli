@@ -1,0 +1,53 @@
+#ifndef GLOBAL_PARAMETERS_GLSLI
+#define GLOBAL_PARAMETERS_GLSLI
+
+
+#define PIPELINE_STAGE_MAINMENU     0
+#define PIPELINE_STAGE_INITLEVELS   (1u << 0)
+#define PIPELINE_STAGE_LOADMAP      (1u << 1)
+
+
+struct GlobalParameters
+{
+    // These are updated by the CPU per frame
+    #define GLOBAL_OFFSET_CPUTIME       0
+    #define GLOBAL_OFFSET_CPUANIMFRAME  (GLOBAL_OFFSET_CPUTIME + 1)
+    #define GLOBAL_OFFSET_CPUANIMTICK   (GLOBAL_OFFSET_CPUANIMFRAME + 1)
+    #define GLOBAL_OFFSET_CPURANDOM     (GLOBAL_OFFSET_CPUANIMTICK + 1) 
+    uint cpuTime;
+    uint cpuAnimFrame;
+    uint cpuAnimTick;
+    uint cpuRandom;
+
+    // Everything else is managed by the GPU
+    #define GLOBAL_OFFSET_PIPELINESTAGE     (GLOBAL_OFFSET_CPURANDOM + 1)
+    #define GLOBAL_OFFSET_LEVELGENSEED      (GLOBAL_OFFSET_PIPELINESTAGE + 1)
+    uint pipelineStage;
+    uint levelGenSeed;
+
+    // Current map data
+    #define GLOBAL_OFFSET_CURRENTLEVEL          (GLOBAL_OFFSET_LEVELGENSEED + 1)
+    #define GLOBAL_OFFSET_CURRENTLEVELMAPSTART  (GLOBAL_OFFSET_CURRENTLEVEL + 1)
+    #define GLOBAL_OFFSET_CURRENTLEVELMAPEND    (GLOBAL_OFFSET_CURRENTLEVELMAPSTART + 1)
+    #define GLOBAL_OFFSET_NUMLINES              (GLOBAL_OFFSET_CURRENTLEVELMAPEND + 1)
+    #define GLOBAL_OFFSET_NUMLIGHTS             (GLOBAL_OFFSET_NUMLINES + 1)
+    uint currentLevel;
+    uint currentLevelMapStart;  // u16:u16
+    uint currentLevelMapEnd;    // u16:u16
+    uint numLines;
+    uint numLights;
+};
+
+
+uint packCurrentLevelCoord(uvec2 coord)
+{
+    return (coord.x << 16) | coord.y;
+}
+
+uvec2 unpackCurrentLevelCoord(uint mapStartOrEnd)
+{
+    return uvec2(mapStartOrEnd >> 16, mapStartOrEnd & 0xffffu);
+}
+
+
+#endif // GLOBAL_PARAMETERS_GLSLI

@@ -1,0 +1,57 @@
+#ifndef GAME_LOGIC_COMMON_GLSLI
+#define GAME_LOGIC_COMMON_GLSLI
+
+
+#include "../../shaders/common.glsl"
+#include "global_parameters.glsli"
+
+
+uint simpleHash32(uvec3 Seed)
+{
+    uint hx = (0xb543c3a6u ^ Seed.x);
+    uint hy = (0x526f94e2u ^ Seed.y);
+    uint hxy = hx * hy;
+    uint hz0 = 0x53c5ca59u ^ (hxy >> 5u);
+    uint hz1 = (0x74743c1bu ^ Seed.z);
+    uint h = hz0 * hz1;
+    return h;
+}
+
+
+uint wang_hash(uint seed)
+{
+    seed = (seed ^ 61) ^ (seed >> 16);
+    seed *= 9;
+    seed = seed ^ (seed >> 4);
+    seed *= 0x27d4eb2d;
+    seed = seed ^ (seed >> 15);
+    return seed;
+}
+
+
+vec3 hs1(float H)
+{
+    float R = abs(H * 6 - 3) - 1;
+    float G = 2 - abs(H * 6 - 2);
+    float B = 2 - abs(H * 6 - 4);
+    return clamp(vec3(R,G,B), vec3(0), vec3(1));
+}
+
+
+vec3 randomHs1Col(uint idx)
+{
+    return hs1((wang_hash(idx) & 0xffff) / 65535.0);
+}
+
+
+// Uses the last 23bits to construct a linear range
+// [0, 1) = [0, 0.9999998808]
+float randomBounded(uint seed)
+{
+    // 1x shift_add
+    // 1x add
+    seed = 0x3f800000u + (seed & 0x7fffffu);
+    return uintBitsToFloat(seed) - 1.0f;
+}
+
+#endif // GAME_LOGIC_COMMON_GLSLI

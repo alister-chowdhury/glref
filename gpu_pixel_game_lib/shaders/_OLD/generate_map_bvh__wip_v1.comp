@@ -1,0 +1,470 @@
+#version 460 core
+
+
+
+// THIS IS REALLY MESSY
+// AND HASNT BEEN TESTED PROPERLY
+
+
+
+#define BVH_V1_METADATA_BBOX       0
+#define BVH_V1_METADATA_LINE       1
+#define BVH_V1_NODE_FLOAT4_STRIDE  3
+
+#define THREADSIZE  1
+#define MAXLINES    1024
+// Shouldn't ever need to be more than 12, given
+// maxlines = 4096?
+#define MAXDEPTH    16
+
+layout(local_size_x=THREADSIZE) in;
+
+
+#include "common.glsli"
+
+
+layout(set=0, binding=0) uniform GlobalParameters_
+{
+    GlobalParameters globals;
+}; 
+
+
+// TODO: MOVE TO ANOTHER SET
+layout(set=0, binding=1) uniform GenerateBVHParams_
+{
+    GenerateBVHParams params;
+};
+
+readonly layout(std430, binding = 2) buffer inLines_ { vec4 inLines[]; };
+writeonly layout(std430, binding = 3) buffer outBVH_ { vec4 outBVH[]; };
+
+
+
+struct WorkingEntryV1
+{
+    vec2 center;
+    uint id;
+};
+
+shared WorkingEntryV1   workspace[MAXLINES];
+
+
+#define SORTING_TYPE WorkingEntryV1
+#define SORTING_NAME_PREFIX splitMiddle_
+#define SORTING_CONTEXT SplitMiddleSortCtx
+#define SORTING_COMP(a, b, ctx) (ctx.splitX ? (a.center.x <= b.center.x) : (a.center.y <= b.center.y))
+#define SORTING_LOAD(a, _) (workspace[a])
+#define SORTING_SET(a, v, _) workspace[a] = v
+
+struct SplitMiddleSortCtx
+{
+    bool splitX;
+};
+
+
+#include "../../shaders/sorting.inl"
+
+#undef SORTING_TYPE
+#undef SORTING_NAME_PREFIX
+#undef SORTING_CONTEXT
+#undef SORTING_COMP
+#undef SORTING_LOAD
+#undef SORTING_SET
+
+
+
+vec4 mergeBounds(vec4 a, vec4 b)
+{
+    a.xy = min(a.xy, b.xy);
+    a.zw = max(a.zw, b.zw);
+    return a;
+}
+
+
+vec4 mergeBoundsPoint(vec4 bounds, vec2 p)
+{
+    bounds.xy = min(bounds.xy, p);
+    bounds.zw = max(bounds.zw, p);
+    return bounds;
+}
+
+
+vec2 bboxCenter(vec4 bounds)
+{
+    return (bounds.xy + bounds.zw) * 0.5;
+}
+
+
+
+vec4 calcCenterBBox(int start, int end)
+{
+    vec4 bbox = workspace[start].center.xyxy;
+    for(int i=++start; i<end; ++i)
+    {
+        bbox = mergeBoundsPoint(bbox, workspace[i].center);
+    }
+    return bbox;
+}
+
+
+#if THREADSIZE == 1
+
+vec4 calcCenterBBoxParallel(uint tid, int start, int end)
+{
+    return calcCenterBBox(start, end);
+}
+
+#else // THREADSIZE == 1
+
+shared uint bboxWorkspaceX;
+shared uint bboxWorkspaceY;
+shared uint bboxWorkspaceZ;
+shared uint bboxWorkspaceW;
+
+
+vec4 calcCenterBBoxParallel(uint tid, int start, int end)
+{
+
+    // We're being a bit cheeky here and relying
+    // on the fact that our lines will always be in
+    // the [0, 1] range and never negative.
+    //
+    // Because of the way IEEE works, less than and
+    // greater than still work when cast to a uint.
+    vec2 center = workspace[start].center;
+    
+    if(tid == 0)
+    {
+        uvec2 centerU32 = floatBitsToUint(center); 
+        bboxWorkspaceX = centerU32.x;
+        bboxWorkspaceY = centerU32.y;
+        bboxWorkspaceZ = centerU32.x;
+        bboxWorkspaceW = centerU32.y;
+    }
+
+    ++start;
+
+    vec4 localBbox = center.xyxy;
+
+    for(uint i=start; i<end; i+=THREADSIZE)
+    {
+        uint lineId = i + tid;
+        if(lineId >= end)
+        {
+            localBbox = mergeBoundsPoint(localBbox,
+                                         workspace[lineId].center);
+        }
+    }
+
+    barrier();
+    atomicMin(bboxWorkspaceX, floatBitsToUint(localBbox.x));
+    atomicMin(bboxWorkspaceY, floatBitsToUint(localBbox.y));
+    atomicMax(bboxWorkspaceZ, floatBitsToUint(localBbox.z));
+    atomicMax(bboxWorkspaceW, floatBitsToUint(localBbox.w));
+    
+    barrier();
+    return vec4(
+        uintBitsToFloat(bboxWorkspaceX),
+        uintBitsToFloat(bboxWorkspaceY),
+        uintBitsToFloat(bboxWorkspaceZ),
+        uintBitsToFloat(bboxWorkspaceW)
+    );
+}
+
+#endif // THREADSIZE == 1
+
+
+
+
+
+// TODO: The nth_element prt of this is single threaded
+//       which is far from ideal!
+int splitMiddle(int start,
+                int end,
+                vec4 referenceBBox,
+                inout vec4 outReferenceBBoxLeft,
+                inout vec4 outReferenceBBoxRight)
+{
+    int num = end - start;
+    int mid = start + ((end - start) + 1) / 2;
+    SplitMiddleSortCtx ctx;
+    ctx.splitX = (referenceBBox.z - referenceBBox.x) > (referenceBBox.w - referenceBBox.x);
+    splitMiddle_nth_element(start, mid, end, ctx);
+
+    if((num & 1) == 1) { --mid; }
+    outReferenceBBoxLeft = calcCenterBBox(start, mid);
+    if((num & 1) == 1) { ++mid; }
+    outReferenceBBoxRight = calcCenterBBox(mid, end);
+
+    if((num & 1) == 1)
+    {
+        vec2 leftCenter =  bboxCenter(outReferenceBBoxLeft);
+        vec2 rightCenter = bboxCenter(outReferenceBBoxRight);
+        vec2 midCenter = workspace[mid-1].center;
+        vec2 dRight = rightCenter - midCenter;
+        vec2 dLeft = rightCenter - leftCenter;
+        if(dot(dRight, dRight) > dot(dLeft, dLeft))
+        {
+            outReferenceBBoxLeft = mergeBoundsPoint(outReferenceBBoxLeft, midCenter);
+        }
+        else
+        {
+            --mid;
+            outReferenceBBoxRight = mergeBoundsPoint(outReferenceBBoxRight, midCenter);
+        }
+    }
+
+    return mid;
+}
+
+struct QueueNode
+{
+    vec4 referenceBBox;
+    vec4 bbox;
+    vec4 v0;
+    vec4 v1;
+    vec4 v2;
+
+    int start;
+    int end;
+    uint parentNodeAndSide;
+    uint allocationAddress;
+
+    int processed;
+};
+
+
+void main()
+{
+    uint tid = gl_LocalInvocationID.x;
+
+#if THREADSIZE == 1
+
+    for(uint i=0; i<params.numLines; ++i)
+    {
+        vec4 line = inLines[i];
+        vec2 center = (line.xy + line.zw) * 0.5;
+        WorkingEntryV1 entry;
+        entry.center = center;
+        entry.id = i;
+        workspace[i] = entry;
+    }
+
+#else // THREADSIZE == 1
+
+    for(uint i=0; i<params.numLines; i+=THREADSIZE)
+    {
+        uint lineId = i + tid;
+        if(lineId >= params.numLines)
+        {
+            vec4 line = inLines[lineId];
+            vec2 center = (line.xy + line.zw) * 0.5;
+
+            WorkingEntryV1 entry;
+            entry.center = center;
+            entry.id = lineId;
+            workspace[lineId] = entry;
+        }
+    }
+    barrier();
+
+#endif // THREADSIZE == 1
+
+    vec4 rootRefBBox = calcCenterBBoxParallel(tid, 0, int(params.numLines));
+
+
+#if THREADSIZE != 1
+    if(tid == 0)
+    {
+#endif // THREADSIZE != 1
+
+        QueueNode queue[MAXDEPTH];
+
+        {
+            QueueNode root;
+            root.referenceBBox = rootRefBBox;
+            root.bbox = vec4(1e+20, 1e+20, -1e+20, -1e+20);
+            root.v0 = vec4(0);
+            root.v1 = vec4(0);
+            root.v2 = vec4(0);
+            root.start = 0;
+            root.end = int(params.numLines);
+            root.allocationAddress = 0;
+            root.parentNodeAndSide = 0xffffffffu;
+            root.processed = 0;
+            queue[0] = root;
+        }
+
+        int queueCount = 1;
+        uint allocationAddress = BVH_V1_NODE_FLOAT4_STRIDE;
+
+        while(queueCount > 0)
+        {
+            QueueNode current = queue[queueCount-1];
+            if(current.processed == 2)
+            {
+                --queueCount;
+                outBVH[current.allocationAddress + 0] = current.v0;
+                outBVH[current.allocationAddress + 1] = current.v1;
+                outBVH[current.allocationAddress + 2] = current.v2;
+
+                if(queueCount == 0)
+                {
+                    break;
+                }
+
+                uint parentNodeAndSide = current.parentNodeAndSide;
+                uint side = parentNodeAndSide & 1u;
+                uint parent = parentNodeAndSide >> 1;
+                queue[parent].processed += 1;
+                queue[parent].bbox = mergeBounds(queue[parent].bbox, current.bbox);
+                if(side == 0)
+                {
+                    queue[parent].v0.xy = vec2(uintBitsToFloat(BVH_V1_METADATA_BBOX),
+                                               uintBitsToFloat(current.allocationAddress));
+                    queue[parent].v1 = current.bbox;
+                }
+                else
+                {
+                    queue[parent].v0.zw = vec2(uintBitsToFloat(BVH_V1_METADATA_BBOX),
+                                               uintBitsToFloat(current.allocationAddress));
+                    queue[parent].v2 = current.bbox;
+                }
+                continue;
+            }
+
+            int num = current.end - current.start;
+
+            // Make a leaf
+            if(num <= 2)
+            {
+                int lineAId = current.start;
+                int lineBId = current.start + 1;
+
+                // Only possible on the root node, if theres only
+                // a single line.
+                if(num == 1)
+                {
+                    lineBId = lineAId;
+                }
+
+                WorkingEntryV1 workspaceA = workspace[lineAId];
+                WorkingEntryV1 workspaceB = workspace[lineBId];
+                vec4 lineA = inLines[workspaceA.id];
+                vec4 lineB = inLines[workspaceB.id];
+
+                vec4 lineABBox = vec4(min(lineA.x, lineA.z),
+                                      min(lineA.y, lineA.w),
+                                      max(lineA.x, lineA.z),
+                                      max(lineA.y, lineA.w));
+                
+                vec4 lineBBBox = vec4(min(lineB.x, lineB.z),
+                                      min(lineB.y, lineB.w),
+                                      max(lineB.x, lineB.z),
+                                      max(lineB.y, lineB.w));
+                
+                current.v0 = vec4(
+                    uintBitsToFloat(BVH_V1_METADATA_LINE),
+                    uintBitsToFloat(workspaceA.id),
+                    uintBitsToFloat(BVH_V1_METADATA_LINE),
+                    uintBitsToFloat(workspaceB.id)
+                );
+                current.v1 = vec4(lineA.xy, lineA.xy - lineA.zw);
+                current.v2 = vec4(lineB.xy, lineB.xy - lineB.zw);
+                current.bbox = mergeBounds(lineABBox, lineBBBox);
+                current.processed = 2;
+                queue[queueCount-1] = current;
+                continue;
+            }
+
+            {
+                vec4 refBboxLeft;
+                vec4 refBboxRight;
+                int mid = splitMiddle(current.start,
+                                      current.end,
+                                      current.referenceBBox,
+                                      refBboxLeft,
+                                      refBboxRight);
+
+                int leftNum = mid - current.start;
+                int rightNum = current.end - mid;
+
+                bool addLeft = true;
+                bool addRight = true;
+
+                if(leftNum == 1)
+                {
+                    int lineAId = current.start;
+                    WorkingEntryV1 workspaceA = workspace[lineAId];
+                    vec4 lineA = inLines[workspaceA.id];
+                    queue[queueCount-1].bbox = vec4(min(lineA.x, lineA.z),
+                                                    min(lineA.y, lineA.w),
+                                                    max(lineA.x, lineA.z),
+                                                    max(lineA.y, lineA.w));
+                    queue[queueCount-1].v0.xy = vec2(uintBitsToFloat(BVH_V1_METADATA_LINE),
+                                                     uintBitsToFloat(workspaceA.id));
+                    queue[queueCount-1].v1 = vec4(lineA.xy, lineA.xy - lineA.zw);
+                    queue[queueCount-1].processed = 1;
+                    addLeft = false;
+                }
+                else if(rightNum == 1)
+                {
+                    int lineAId = mid;
+                    WorkingEntryV1 workspaceA = workspace[lineAId];
+                    vec4 lineA = inLines[workspaceA.id];
+                    queue[queueCount-1].bbox = vec4(min(lineA.x, lineA.z),
+                                                    min(lineA.y, lineA.w),
+                                                    max(lineA.x, lineA.z),
+                                                    max(lineA.y, lineA.w));
+                    queue[queueCount-1].v0.zw = vec2(uintBitsToFloat(BVH_V1_METADATA_LINE),
+                                                     uintBitsToFloat(workspaceA.id));
+                    queue[queueCount-1].v2 = vec4(lineA.xy, lineA.xy - lineA.zw);
+                    queue[queueCount-1].processed = 1;
+                    addRight = false;
+                }
+
+                uint thisIdShifted = uint(queueCount - 1) << 1;
+
+                if(addLeft)
+                {
+                    QueueNode newNode;
+                    newNode.referenceBBox = refBboxLeft;
+                    newNode.bbox = vec4(1e+20, 1e+20, -1e+20, -1e+20);
+                    newNode.v0 = vec4(0);
+                    newNode.v1 = vec4(0);
+                    newNode.v2 = vec4(0);
+                    newNode.start = current.start;
+                    newNode.end = mid;
+                    newNode.allocationAddress = allocationAddress;
+                    newNode.parentNodeAndSide = thisIdShifted;
+                    newNode.processed = 0;
+                    queue[queueCount] = newNode;
+                    allocationAddress += BVH_V1_NODE_FLOAT4_STRIDE;
+                    ++queueCount;
+                }
+
+                if(addRight)
+                {
+                    QueueNode newNode;
+                    newNode.referenceBBox = refBboxRight;
+                    newNode.bbox = vec4(1e+20, 1e+20, -1e+20, -1e+20);
+                    newNode.v0 = vec4(0);
+                    newNode.v1 = vec4(0);
+                    newNode.v2 = vec4(0);
+                    newNode.start = current.start;
+                    newNode.end = mid;
+                    newNode.allocationAddress = allocationAddress;
+                    newNode.parentNodeAndSide = thisIdShifted | 1u;
+                    newNode.processed = 0;
+                    queue[queueCount] = newNode;
+                    allocationAddress += BVH_V1_NODE_FLOAT4_STRIDE;
+                    ++queueCount;
+                }
+            }
+        }
+
+#if THREADSIZE != 1
+    }
+#endif // THREADSIZE != 1
+
+}
