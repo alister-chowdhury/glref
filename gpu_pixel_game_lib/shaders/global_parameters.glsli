@@ -4,7 +4,9 @@
 
 #define PIPELINE_STAGE_MAINMENU     0
 #define PIPELINE_STAGE_INITLEVELS   (1u << 0)
-#define PIPELINE_STAGE_LOADMAP      (1u << 1)
+#define PIPELINE_STAGE_CHAREDIT     (1u << 1)
+#define PIPELINE_STAGE_LOADMAP      (1u << 2)
+#define PIPELINE_STAGE_PLAYING      (1u << 3)
 
 
 struct GlobalParameters

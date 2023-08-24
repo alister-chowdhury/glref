@@ -1,0 +1,115 @@
+
+
+Logical pipeline stages are used to control different stages of game logic, each stage
+can write the stage to be evaluated next frame.
+
+Inner shaders are controlled via indirect dispatches/draws which are toggled on and off
+at the start of each frame by `init_pipeline_stage`
+
+
+---> Were going to need some way of actually debugging all this <---
+---> Would be nice to have some way to save and load <---
+---> Need to do bosses <---
+
+PIPELINE_STAGE_MAINMENU
+    - Has buttons to go to
+        - Continue game (if a game is in play)  => PIPELINE_STAGE_PLAYING
+        - New game (should confirm if a game is in play) => PIPELINE_STAGE_INITLEVELS
+    (none of this is done)
+
+
+PIPELINE_STAGE_INITLEVELS
+    - Generates index-atlas of maps via BSPs
+        (POC is done, but only works on one map at a time)
+        (missing player spawn, player exit, enemies and loot)
+    - Sets up the levelgen seed, sets the initial level to 0
+        (done)
+    => PIPELINE_STAGE_CHAREDIT
+        (easily done, but currenly goes to PIPELINE_STAGE_LOADMAP)
+
+
+PIPELINE_STAGE_CHAREDIT
+    - Character editor screen
+    => PIPELINE_STAGE_LOADMAP
+    (none of this is done)
+
+
+PIPELINE_STAGE_LOADMAP
+    - Using the levelgen seed and current level use the texture atlas to throw down ground
+      different floor and wall tiles into a texture.
+        (not done at all)
+    - Generates blocking lines based upon the current BSP map
+        (POC semi done, needs revisiting)
+    - Generate BVH for raytracing + possibly distance field, if its useful
+        (POC done, via `grid_based_bvh`)
+    - Generate light data (light list, circular shadow maps, bounds)
+        (not done at all)
+    - Mark enemies as needing to be reset
+        (not done at all)
+    - Write players location to be the start or end point, based upon
+      how they entered the level.
+        (not done at all)
+    => PIPELINE_STAGE_PLAYING
+      (not done at all)
+
+
+PIPELINE_STAGE_PLAYING
+
+    - Do some sort of fade thing if they've just entered
+      and display a generated level name on screen for a bit
+        (not done at all)
+
+    - If need to reset enemies, reset enemy data
+        (not done at all)
+
+    - Update enemies last tile they have seen the player
+        (not done at all)
+    - Update animations (???)
+        (not done at all)
+    - Update turn based logic if in combat (???)
+        (not done at all)
+    - Deal with user inputs
+        (not done at all)
+
+    - Generate project and stencil visibility
+        (not done at all)
+    - Update fog of war atlas for current level (possibly only needed when moving?)
+        (not done at all)
+    - Update depth buffer for fog of war, so we can draw it in a single pass.
+        (not done at all)
+    - Draw player + enemies + loot into depth buffer
+        (not done at all)
+    - Draw UI into depth buffer + stencil bit
+        (not done at all)
+
+    - Draw map (direct visibility)
+        (not done at all)
+    - Draw player + enemies + loot
+        (not done at all)
+    - Render lights
+        (not done at all)
+    - Draw map with fow
+        (not done at all)
+    - Draw UI
+        (not done at all)
+
+    - On acquiring loot, remove it from the global atlas and put down
+      a regular map tile, then re-render it into the current map.
+        (not done at all)
+
+    - On resting at a bonfire, reset enemies, replenish stats
+      do some sort of fade thing.
+        (not done at all)
+
+    - On leaving the screen, reset enemies, increment or decrement the current level
+      and go to PIPELINE_STAGE_LOADMAP
+      do some sort of fade thing
+        (not done at all)
+
+    - On death display you died or w/e, reset enemies, replenish health,
+      mark xp location, and loose it, so they can go get it later
+      do some sort of fade thing
+        (not done at all)
+
+
+    (not done at all)

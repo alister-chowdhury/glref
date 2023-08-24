@@ -13,7 +13,7 @@
 #endif // LINE_BVH_V2_FORCE_FULL_TRAVERSAL
 
 
-readonly layout(std430, binding = LINE_BVH_V2_BINDING) buffer v2LinesBvh_ { vec4 v2LinesBvh[]; };
+readonly  layout(std430, binding = LINE_BVH_V2_BINDING) buffer v2LinesBvh_ { vec4 v2LinesBvh[]; };
 
 
 #define LINE_BVH_V2_BBOX_TYPE           0
