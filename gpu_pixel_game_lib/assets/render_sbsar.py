@@ -157,7 +157,10 @@ if __name__ == "__main__":
     generators = (
         _generate_brick_commands,
         _generate_blood_decal_commands,
-        _generate_wall_commands,
+
+        # No longer using walls
+        # _generate_wall_commands,
+
         _generate_ground_commands,
     )
 

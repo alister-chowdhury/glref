@@ -113,3 +113,13 @@ PIPELINE_STAGE_PLAYING
 
 
     (not done at all)
+
+
+
+/////////
+
+
+Side node, maybe rather than having pipeline stages as a linear steps, it might make sense
+to have pipeline steps, which get activated, e.g:
+
+DRAW_MAIN_MENU_FLAG, LOAD_MAP_FLAG, ... etc

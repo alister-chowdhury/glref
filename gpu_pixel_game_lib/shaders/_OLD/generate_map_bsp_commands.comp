@@ -15,7 +15,7 @@
 //  So it should be possible to generate more complicated maps
 //  for later levels and siomple maps for early levels.
 
-layout(local_size_x=32) in;
+layout(local_size_x=64) in;
 
 
 #include "common.glsli"
@@ -33,12 +33,12 @@ writeonly layout(std430, binding = 1) buffer drawCmds_      { vec4 outDrawCmds[]
 writeonly layout(std430, binding = 2) buffer drawAllocator_ { uint outDrawAllocator[]; };
 
 
-#define MAX_TILES_X 128
-#define MAX_TILES_Y 128
+#define MAX_TILES_X 64
+#define MAX_TILES_Y 64
 
-#define MIN_DIM_X   4
-#define MIN_DIM_Y   4
-#define MIN_AREA    16
+#define MIN_DIM_X   5
+#define MIN_DIM_Y   5
+#define MIN_AREA    24
 
 #define PADDING 1
 
@@ -84,7 +84,7 @@ void main()
     }
     barrier();
 
-    for(uint it=1u; it<16u; it<<=1)
+    for(uint it=1u; it<32u; it<<=1)
     {
         if(tid < it)
         {

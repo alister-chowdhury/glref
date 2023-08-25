@@ -1,0 +1,85 @@
+#ifndef MAP_ATLAS_COMMON_GLSLI
+#define MAP_ATLAS_COMMON_GLSLI
+
+
+#define MAP_ATLAS_WALL_ID_NONE  0
+#define MAP_ATLAS_WALL_ID_WALL  1
+#define MAP_ATLAS_WALL_ID_FLOOR 2
+
+
+#define MAP_ATLAS_WALL_DEPTH_NONE   0x0fff
+#define MAP_ATLAS_WALL_DEPTH_WALL   0x0ff0
+#define MAP_ATLAS_WALL_DEPTH_FLOOR  0x0fe0
+
+
+#define FINAL_ATLAS_WIDTH   128
+#define FINAL_ATLAS_HEIGHT  128
+
+
+struct MapAtlasLevelInfo
+{
+    uvec2   offset;
+    uvec2   size;
+    vec2    inverseSize;
+    uint    minDim;
+    uint    minArea;
+};
+
+
+MapAtlasLevelInfo makeMapAtlasLevelInfo(uvec2 offset,
+                                        uvec2 size,
+                                        uint minDim,
+                                        uint minArea)
+{
+    MapAtlasLevelInfo result;
+    result.offset = offset;
+    result.size = size;
+    result.inverseSize = vec2(1.0) / vec2(size);
+    result.minDim = minDim;
+    result.minArea = minArea;
+    return result;
+}
+
+
+// Swap this out with a buffer later?
+MapAtlasLevelInfo getLevelAtlasInfo(uint level)
+{
+    switch(level & 7u)
+    {
+        case 0: return makeMapAtlasLevelInfo(uvec2(62, 84),
+                                             uvec2(16, 16),
+                                             2u,
+                                             16u);
+        case 1: return makeMapAtlasLevelInfo(uvec2(40, 64),
+                                             uvec2(22, 22),
+                                             3u,
+                                             16u);
+        case 2: return makeMapAtlasLevelInfo(uvec2(96, 81),
+                                             uvec2(26, 26),
+                                             3u,
+                                             16u);
+        case 3: return makeMapAtlasLevelInfo(uvec2(96, 52),
+                                             uvec2(29, 29),
+                                             3u,
+                                             20u);
+        case 4: return makeMapAtlasLevelInfo(uvec2(64, 52),
+                                             uvec2(32, 32),
+                                             4u,
+                                             16u);
+        case 5: return makeMapAtlasLevelInfo(uvec2(0, 64),
+                                             uvec2(40, 40),
+                                             4u,
+                                             20u);
+        case 6: return makeMapAtlasLevelInfo(uvec2(64, 0),
+                                             uvec2(52, 52),
+                                             4u,
+                                             20u);
+        case 7: return makeMapAtlasLevelInfo(uvec2(0, 0),
+                                             uvec2(64, 64),
+                                             5u,
+                                             24u);
+    }
+}
+
+
+#endif // MAP_ATLAS_COMMON_GLSLI
