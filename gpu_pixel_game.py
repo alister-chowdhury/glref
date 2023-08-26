@@ -68,6 +68,11 @@ _DRAW_BVH_DEBUG_PROGRAM = viewport.make_permutation_program(
     GL_FRAGMENT_SHADER = gpu_pixel_game_lib.DRAW_BVH_DEBUG_FRAG
 )
 
+_GEN_MAP_ATLAS_V2_PROGRAM = viewport.make_permutation_program(
+    _DEBUGGING,
+    GL_COMPUTE_SHADER = gpu_pixel_game_lib.GEN_MAP_ATLAS_V2_COMP
+)
+
 LEVEL_TILES_X = 128
 LEVEL_TILES_Y = 128
 
@@ -86,6 +91,7 @@ class Renderer(object):
         self.window.on_keypress = self._keypress
 
         self._n = 0
+        self._new_v = 1
 
     def run(self):
         self.window.run()
@@ -169,33 +175,68 @@ class Renderer(object):
             128,
         )
 
+        global_parameters2 = numpy.array(
+            [
+                0,          # cpuTime
+                0,          # cpuAnimFrame
+                0,          # cpuAnimTick
+                0x12345678, # cpuRandom
+
+                0,          # pipelineStage
+                0,          # levelGenSeed
+                0,          # currentLevel
+                0,          # currentLevelMapStart
+                0,          # currentLevelMapEnd
+                0,          # numLines
+                0,          # numLights
+                # Padding
+                0,
+            ],
+            dtype=numpy.uint32
+        ).tobytes()
+
+        self._buffers2_ptr = (ctypes.c_int * 10)()
+        glCreateBuffers(10, self._buffers2_ptr)
+        self._global_parameters2 = self._buffers2_ptr[0]
+        glNamedBufferStorage(self._global_parameters2, len(global_parameters2), global_parameters2, 0)
+
+
+
         glViewport(0, 0, wnd.width, wnd.height)
 
 
     def _draw(self, wnd):
         glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT)
 
-        # Should be indirect draw later
-        glUseProgram(_GENERATE_MAP_BSP_COMMANDS_PROGRAM.one())
-        glBindBufferBase(GL_UNIFORM_BUFFER, 0, self._global_parameters)
-        glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 1, self._draw_commands)
-        glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 2, self._draw_allocator)
-        glDispatchCompute(1, 1, 1)
 
-
-        glMemoryBarrier(GL_SHADER_STORAGE_BARRIER_BIT)
-        with self._map_atlas_fb.bind():
-            glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT)
-            glViewport(0, 0, 128, 128)
-            glUseProgram(_GENERATE_MAP_BSP_PROGRAM.get())
+        if self._new_v:
+            glUseProgram(_GEN_MAP_ATLAS_V2_PROGRAM.one())
+            glBindBufferBase(GL_UNIFORM_BUFFER, 0, self._global_parameters2)
+            glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 1, self._map_atlas_tiles.texture)
+            glDispatchCompute(1, 1, 8)
+            glMemoryBarrier(GL_SHADER_STORAGE_BARRIER_BIT)
+            
+        else:
+            # Should be indirect draw later
+            glUseProgram(_GENERATE_MAP_BSP_COMMANDS_PROGRAM.one())
             glBindBufferBase(GL_UNIFORM_BUFFER, 0, self._global_parameters)
             glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 1, self._draw_commands)
-            glBindVertexArray(viewport.get_dummy_vao())
-            glBindBuffer(GL_DRAW_INDIRECT_BUFFER, self._draw_allocator)
-            glDrawArraysIndirect(GL_TRIANGLES, ctypes.c_void_p(0))
-        glViewport(0, 0, wnd.width, wnd.height)
+            glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 2, self._draw_allocator)
+            glDispatchCompute(1, 1, 1)
 
-        glMemoryBarrier(GL_FRAMEBUFFER_BARRIER_BIT)
+            glMemoryBarrier(GL_SHADER_STORAGE_BARRIER_BIT)
+            with self._map_atlas_fb.bind():
+                glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT)
+                glViewport(0, 0, 128, 128)
+                glUseProgram(_GENERATE_MAP_BSP_PROGRAM.get())
+                glBindBufferBase(GL_UNIFORM_BUFFER, 0, self._global_parameters)
+                glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 1, self._draw_commands)
+                glBindVertexArray(viewport.get_dummy_vao())
+                glBindBuffer(GL_DRAW_INDIRECT_BUFFER, self._draw_allocator)
+                glDrawArraysIndirect(GL_TRIANGLES, ctypes.c_void_p(0))
+            glViewport(0, 0, wnd.width, wnd.height)
+            glMemoryBarrier(GL_FRAMEBUFFER_BARRIER_BIT)
+
         glUseProgram(_DRAW_BSP_MAP_DEBUG_PROGRAM.get(VS_OUTPUT_UV=0))
         glBindTextureUnit(0, self._map_atlas_tiles.texture)
         glBindVertexArray(viewport.get_dummy_vao())
@@ -253,7 +294,9 @@ class Renderer(object):
 
     def _keypress(self, wnd, key, x, y):
 
-        if key == b'c':
+        if key == b'n':
+            self._new_v ^= 1
+        elif key == b'c':
             glDeleteBuffers(1, self._buffers_ptr)
             glCreateBuffers(1, self._buffers_ptr)
             self._global_parameters = self._buffers_ptr[0]
@@ -267,9 +310,34 @@ class Renderer(object):
                 ],
                 dtype=numpy.uint32
             ).tobytes()
-            self._n += 1
             glNamedBufferStorage(self._global_parameters, len(global_parameters), global_parameters, 0)
 
+            glDeleteBuffers(1, self._buffers2_ptr)
+            glCreateBuffers(1, self._buffers2_ptr)
+            self._global_parameters2 = self._buffers2_ptr[0]
+            global_parameters2 = numpy.array(
+                [
+                    0,          # cpuTime
+                    0,          # cpuAnimFrame
+                    0,          # cpuAnimTick
+                    self._n, # cpuRandom
+
+                    0,          # pipelineStage
+                    0,          # levelGenSeed
+                    0,          # currentLevel
+                    0,          # currentLevelMapStart
+                    0,          # currentLevelMapEnd
+                    0,          # numLines
+                    0,          # numLights
+                    # Padding
+                    0,
+                ],
+                dtype=numpy.uint32
+            ).tobytes()
+
+            glNamedBufferStorage(self._global_parameters2, len(global_parameters2), global_parameters2, 0)
+
+            self._n += 1
 
         wnd.redraw()
 

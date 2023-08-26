@@ -15,6 +15,11 @@
 #define FINAL_ATLAS_WIDTH   128
 #define FINAL_ATLAS_HEIGHT  128
 
+#define MAX_LEVEL_DIM       64
+
+#define ENTER_ROOM_ID       1
+#define EXIT_ROOM_ID        2
+
 
 struct MapAtlasLevelInfo
 {
@@ -46,7 +51,7 @@ MapAtlasLevelInfo getLevelAtlasInfo(uint level)
 {
     switch(level & 7u)
     {
-        case 0: return makeMapAtlasLevelInfo(uvec2(62, 84),
+        case 0: return makeMapAtlasLevelInfo(uvec2(64, 84),
                                              uvec2(16, 16),
                                              2u,
                                              16u);

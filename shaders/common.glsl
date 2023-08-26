@@ -123,4 +123,26 @@ vec3 unpackR11G11B10(uint value)
 }
 
 
+
+// These are basically hacks to prevent glslc from propagating loads
+// to within a branch, we introduce a redundant & operation, which
+// will be kept in SPIRV code, but will be optimized away when a driver
+// evaluates it.
+#define PREVENT_BRANCH_LOADING(x) preventBranchLoadingInternal(x)
+
+uint preventBranchLoadingInternal(uint x) { return x & 0xffffffffu; }
+uvec2 preventBranchLoadingInternal(uvec2 x) { return x & 0xffffffffu; }
+uvec3 preventBranchLoadingInternal(uvec3 x) { return x & 0xffffffffu; }
+uvec4 preventBranchLoadingInternal(uvec4 x) { return x & 0xffffffffu; }
+
+int preventBranchLoadingInternal(int x) { return int(preventBranchLoadingInternal(uint(x))); }
+ivec2 preventBranchLoadingInternal(ivec2 x) { return ivec2(preventBranchLoadingInternal(uvec2(x))); }
+ivec3 preventBranchLoadingInternal(ivec3 x) { return ivec3(preventBranchLoadingInternal(uvec3(x))); }
+ivec4 preventBranchLoadingInternal(ivec4 x) { return ivec4(preventBranchLoadingInternal(uvec4(x))); }
+
+float preventBranchLoadingInternal(float x) { return uintBitsToFloat(preventBranchLoadingInternal(floatBitsToUint(x))); }
+vec2 preventBranchLoadingInternal(vec2 x) { return uintBitsToFloat(preventBranchLoadingInternal(floatBitsToUint(x))); }
+vec3 preventBranchLoadingInternal(vec3 x) { return uintBitsToFloat(preventBranchLoadingInternal(floatBitsToUint(x))); }
+vec4 preventBranchLoadingInternal(vec4 x) { return uintBitsToFloat(preventBranchLoadingInternal(floatBitsToUint(x))); }
+
 #endif

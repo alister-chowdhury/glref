@@ -14,8 +14,8 @@
 //
 //  So it should be possible to generate more complicated maps
 //  for later levels and siomple maps for early levels.
-
-layout(local_size_x=64) in;
+#define NUM_THREADS 64
+layout(local_size_x=NUM_THREADS) in;
 
 
 #include "common.glsli"
@@ -56,7 +56,7 @@ struct DrawQueue
 };
 
 shared uint         drawAllocator;
-shared DrawQueue    queue[32];
+shared DrawQueue    queue[64];
 
 
 // Uses the last 23bits to construct a linear range
@@ -84,7 +84,7 @@ void main()
     }
     barrier();
 
-    for(uint it=1u; it<32u; it<<=1)
+    for(uint it=1u; it<NUM_THREADS; it<<=1)
     {
         if(tid < it)
         {

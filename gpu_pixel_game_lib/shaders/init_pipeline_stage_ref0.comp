@@ -1,0 +1,30 @@
+#version 460 core
+
+layout(local_size_x=32) in;
+
+
+#include "common.glsli"
+
+
+layout(set=0, binding = 0) uniform GlobalParameters_
+{
+    GlobalParameters globals;
+}; 
+
+readonly layout(std430, binding = 1) buffer offsets_ { uint offsets[]; };
+writeonly layout(std430, binding = 2) buffer indirectCommands_ { uint outIndirectCommands[]; };
+
+
+void main()
+{
+    uint tid = gl_LocalInvocationID.x;
+    uint numOffsets = offsets[0];
+    if(tid < numOffsets)
+    {
+        uint mask = offsets[1u + (tid * 4u)];
+        uint offset = offsets[2u + (tid * 4u)];
+        uint onTrue = offsets[3u + (tid * 4u)];
+        uint onFalse = offsets[4u + (tid * 4u)];
+        outIndirectCommands[offset] = ((mask & globals.pipelineStage) != 0u) ? onTrue : onFalse;
+    }
+}

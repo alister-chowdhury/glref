@@ -1,0 +1,358 @@
+#version 460 core
+
+
+#define NUM_THREADS     64
+#define MAX_PATHS       (NUM_THREADS - 1)
+
+
+layout(local_size_x=NUM_THREADS) in;
+
+
+#include "../common.glsli"
+#include "../map_atlas_common.glsli"
+#include "mapgen_common.glsli"
+
+
+layout(set=0, binding = 0) uniform GlobalParameters_
+{
+    GlobalParameters globals;
+}; 
+
+
+writeonly layout(binding=1, r8ui) uniform uimage2D mapAtlas;
+
+
+// Uses the last 23bits to construct a linear range
+// [0, 1) = [0.375, 0.625)
+float randomBounded0125(uint seed)
+{
+    // 1x shift_add
+    // 1x add
+    seed = 0x3e800000u + (seed & 0x7fffffu);
+    return uintBitsToFloat(seed) + 0.125f;
+}
+
+
+struct DrawQueue
+{
+    ivec4   span;
+};
+
+
+// Split a node into two children, will return back
+// the direction that was used for splitting:
+//  0 = split along y
+//  1 = split along x
+uint bspSplit(const DrawQueue parent,
+              inout DrawQueue left,
+              inout DrawQueue right,
+              uint randomSeed)
+{
+    ivec2 dims = parent.span.zw - parent.span.xy;
+
+    // uint seed = simpleHash32(uvec3(globals.cpuRandom, it, tid));
+    float splitAmount = randomBounded0125(randomSeed);
+
+    // Randomise split direction if both width and height are equal
+    // otherwise, split whichever is bigger.
+    uint splitDirection = (dims.x == dims.y) 
+                            ? (randomSeed >> 23) & 1u
+                            : dims.x < dims.y
+                                ? 1u : 0u
+                            ;
+    left = parent;
+    right = parent;
+
+    const int padding = 1;
+
+    // Split across X
+    if(splitDirection == 0u)
+    {
+        left.span.z = left.span.x + int((float(dims.x) + 0.5) * splitAmount);
+        right.span.x = left.span.z;
+        left.span.x += padding;
+        left.span.z -= padding;
+        right.span.x += padding;
+        right.span.z -= padding;
+    }
+    // Split across Y
+    else
+    {
+        left.span.w = left.span.y + int((float(dims.y) + 0.5) * splitAmount);
+        right.span.y = left.span.w;
+        left.span.y += padding;
+        left.span.w -= padding;
+        right.span.y += padding;
+        right.span.w -= padding;
+    }
+
+    return splitDirection;
+}
+
+
+// We know the final texture size is never greater than
+// 128x128, as such we can save a bit of SMEM by packing
+// spans into a sing uint.
+#define packed_span_t   uint
+#define packed_bsp_t    uint
+
+ivec4 unpackSpan(packed_span_t x)
+{
+    return ivec4((uvec4(x) >> ivec4(0, 8, 16, 24)) & 0xffu);
+}
+
+packed_span_t packSpan(ivec4 x)
+{
+    uvec4 y = uvec4(x) << ivec4(0, 8, 16, 24);
+    return y.x | y.y | y.z | y.w;
+}
+
+DrawQueue unpackBspNode(packed_bsp_t x)
+{
+    DrawQueue y;
+    y.span = unpackSpan(x);
+    return y;
+}
+
+packed_bsp_t packBspNode(DrawQueue x)
+{
+    return packSpan(x.span);
+}
+
+shared packed_bsp_t  bspQueue[NUM_THREADS];
+shared packed_span_t pathQueue[MAX_PATHS];
+
+
+// Generate the BSP and path spans for a given level, writing
+// the result into bspQueue and pathQueue
+void generateBsp(uint tid, MapAtlasLevelInfo atlasInfo)
+{
+    // Root node, which encompasses the entire level
+    if(tid == 0u)
+    {
+        DrawQueue newQueue;
+        newQueue.span = ivec4(0,
+                              0,
+                              atlasInfo.size.x,
+                              atlasInfo.size.y);
+        bspQueue[0] = packBspNode(newQueue);
+    }
+    barrier();
+
+    // Keep splitting the BSP, and adding draw commands for paths
+    // that connect both sides
+    for(uint it = 1u; it < NUM_THREADS; it <<= 1)
+    {
+        if(tid < it)
+        {
+            DrawQueue parent = unpackBspNode(bspQueue[tid]);
+            uint splitSeed = simpleHash32(uvec3(globals.cpuRandom, it, tid));
+
+            DrawQueue left, right;
+            uint splitDirection = bspSplit(parent, left, right, splitSeed);
+
+            // Make sure the split is valid.
+            ivec2 leftDeriv = left.span.zw - left.span.xy;
+            ivec2 rightDeriv = right.span.zw - right.span.xy;
+            int leftArea = leftDeriv.x * leftDeriv.y;
+            int rightArea = rightDeriv.x * rightDeriv.y;
+
+            ivec4 pathSpan = ivec4(0);
+
+            if((leftDeriv.x >= atlasInfo.minDim)
+                && (leftDeriv.y >= atlasInfo.minDim)
+                && (rightDeriv.x >= atlasInfo.minDim)
+                && (rightDeriv.y >= atlasInfo.minDim)
+                && (leftArea >= atlasInfo.minArea)
+                && (rightArea >= atlasInfo.minArea))
+            {
+
+                // Write a new span
+                vec2 leftCenter = vec2(left.span.xy)
+                                  + vec2(leftDeriv) * 0.5
+                                  + 0.5
+                                  ;
+
+                vec2 rightCenter = vec2(right.span.xy)
+                                  + vec2(rightDeriv) * 0.5
+                                  + 0.5
+                                  ;
+
+                vec4 path = (splitDirection == 0)
+                    ? vec4(vec2(leftCenter.x, rightCenter.y), rightCenter + 1.0)
+                    : vec4(leftCenter, vec2(leftCenter.x, rightCenter.y) + 1.0)
+                    ;
+
+                pathSpan = ivec4(path);
+
+                // Swap left and right randomly, we use the bspNodes
+                // index to determine which room contains the entrance
+                // and exit.
+                if(((splitSeed >> 24) & 1u) == 0u)
+                {
+                    DrawQueue tmp = left;
+                    left = right;
+                    right = tmp;
+                }
+
+                // Update the parents slot in the queue with the left node
+                // and then create a path between the centers of the two
+                // leaf nodes
+                bspQueue[tid] = packBspNode(left);
+            }
+            else
+            {
+                // Leave the parents data (left node) alone, either it will be split
+                // the next iteration, or it will become a leaf.
+                right.span = ivec4(0, 0, 0, 0);
+            }
+
+            bspQueue[it + tid] = packBspNode(right);
+            pathQueue[it + tid - 1] = packSpan(pathSpan);
+        }
+        barrier();
+    }
+}
+
+
+// TODO: We _should_ actually store this as:
+//  MAX_LEVEL_DIM x (MAX_LEVEL_DIM / 4)
+//  since we really won't ever need more than a byte
+//  per pixel, however it becomes slightly more akward
+//  with respect to syncronisation.
+//
+//  Currently, we're using `16384` bytes of shared mem
+//  on this alone, which is greater than maximum available
+//  on a lot of mobile chips (and even some desktop).
+shared uint renderScratch[MAX_LEVEL_DIM * MAX_LEVEL_DIM];
+
+
+uint sampleRenderScratch(uint offset)
+{
+    return offset < (MAX_LEVEL_DIM * MAX_LEVEL_DIM)
+            ? renderScratch[offset]
+            : 0u;
+}
+
+
+void renderBsp(uint tid, MapAtlasLevelInfo atlasInfo)
+{
+    // Render paths + levels
+    for(uint it = tid; it < (MAX_LEVEL_DIM * MAX_LEVEL_DIM); it += NUM_THREADS)
+    {
+        ivec2 localCoord = ivec2(uvec2(it % MAX_LEVEL_DIM, it / MAX_LEVEL_DIM));
+
+        uint nextRoomId = 0;
+        uint pixelId = 0u;
+
+        for(uint i=0; i<NUM_THREADS; ++i)
+        {
+            ivec4 nodeSpan = unpackBspNode(bspQueue[i]).span;
+            if(nodeSpan.x == nodeSpan.z) { continue; }
+            uint roomId = ++nextRoomId;
+
+            // Ok for reasons I dont know, if I remove this, it seems to draw
+            // this incorrectly, probably some missing barrier?
+            // (Only happening on intel???)
+
+            // uint lastRoomId = 2u;
+            // if(roomId == 1) { roomId = lastRoomId; }
+            // else if(roomId == lastRoomId) { roomId = 1u; }
+            
+            // Ensure the enter/exit room are reasonably far away.
+            //
+            // Does a reasonably good job of seperating the start
+            // and end rooms.
+            uint lastRoomId = 4u;
+            if(roomId == EXIT_ROOM_ID) { roomId = lastRoomId; }
+            else if(roomId == lastRoomId) { roomId = EXIT_ROOM_ID; }
+            
+
+            if(localCoord.x >= nodeSpan.x && localCoord.x < nodeSpan.z
+                && localCoord.y >= nodeSpan.y && localCoord.y < nodeSpan.w)
+            {
+                pixelId = roomId;
+                break;
+            }
+        }
+
+        if(pixelId == 0u)
+        {
+            for(uint i=0; i<MAX_PATHS; ++i)
+            {
+                ivec4 pathSpan = unpackSpan(pathQueue[i]);
+                if(pathSpan.x == pathSpan.z) { continue; }
+
+                if(localCoord.x >= pathSpan.x && localCoord.x < pathSpan.z
+                    && localCoord.y >= pathSpan.y && localCoord.y < pathSpan.w)
+                {
+                    pixelId = 0xffu;
+                    break;
+                }
+            }            
+        }
+
+        renderScratch[it] = pixelId;
+    }
+    barrier();
+
+
+    // Flood fill the nearest ids for paths, so
+    // they semantically become part of the room.
+    // TODO: curretly doing 1pix at a time, which isn't great.
+    // TODO: we should be able to limit the amount of pixels
+    //       for consideration based upon the pixels within
+    //       pathSpan
+    for(uint i=0; i<8u; ++i)
+    {
+        for(uint it = 0; it < (MAX_LEVEL_DIM * MAX_LEVEL_DIM); it += NUM_THREADS)
+        {
+            uint pixelId = it + tid;
+            uvec4 sides = uvec4(
+                sampleRenderScratch(pixelId + 1),
+                sampleRenderScratch(pixelId - 1),
+                sampleRenderScratch(pixelId + MAX_LEVEL_DIM),
+                sampleRenderScratch(pixelId - MAX_LEVEL_DIM)
+            );
+            uint self = sampleRenderScratch(pixelId);
+            barrier();
+
+            if(self == 0xffu)
+            {
+                uint found = 0u;
+                if(sides.x != 0u && sides.x != 0xffu) { found = sides.x; }
+                else if(sides.y != 0u && sides.y != 0xffu) { found = sides.y; }
+                else if(sides.z != 0u && sides.z != 0xffu) { found = sides.z; }
+                else if(sides.w != 0u && sides.w != 0xffu) { found = sides.w; }
+
+                if(found != 0u)
+                {
+                    renderScratch[pixelId] = found;
+                }
+            }
+
+            barrier();
+        }
+    }
+
+    // Write out to the final image
+    for(uint it = tid; it < (MAX_LEVEL_DIM * MAX_LEVEL_DIM); it += NUM_THREADS)
+    {
+        uvec2 localCoord = uvec2(it % MAX_LEVEL_DIM, it / MAX_LEVEL_DIM);
+        if(localCoord.x < atlasInfo.size.x && localCoord.y < atlasInfo.size.y)
+        {
+            imageStore(mapAtlas,
+                       ivec2(atlasInfo.offset + localCoord),
+                       uvec4(renderScratch[it]));
+        }
+    }
+}
+
+
+void main()
+{
+    uint tid = gl_LocalInvocationID.x;
+    MapAtlasLevelInfo atlasInfo = getLevelAtlasInfo(gl_GlobalInvocationID.z);
+    generateBsp(tid, atlasInfo);
+    renderBsp(tid, atlasInfo);
+}

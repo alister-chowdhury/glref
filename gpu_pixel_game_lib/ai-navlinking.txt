@@ -1,0 +1,93 @@
+
+
+navigation during BVH creation
+
+- Assigning each node a id, starting at 0, and each depth down is 2*parent+1, 2*parent+2.
+
+so:
+                                root:0
+                left:1                              right:2
+
+    left:3              right:4             left:5              right:6
+left:7  right:8     left:9  right:10    left:11 right:12    left:13 right:14
+
+
+And when drawing connectors, we also draw into another buffer:
+    [current-id, left-direction, right-direction, parent-direction]
+
+We also need to do pass where we render the rooms, marking them as not evaluated+walkable,
+we need to do this so we can flood fill, but also to prevent multiple navlinks
+
+
+Ok, new plan--
+
+
+    We render each room with it's unique id.
+
+
+
+----------------------------
+
+Then doing a floodfill (possibly jump flooding), we can have each tile of a room
+point back to it's relevant connections.
+
+
+Notes:
+    left is always odd, right is always even
+    depth ranges are [2^n-1, 2^(n+1)-2]
+
+
+Then when it comes from an AI attempting to move to a tile:
+    
+    #1 read current tile nav data
+    #2 read target tile nav data
+    #3 if same navid, attempt to directly walk to it
+        end
+    #4 resolve depth id of both nodes.
+    #5 if target depth id > current depth id
+        if walking up parent ids lands current id
+            walk towards left or right
+            end
+    #6 walk to parent
+        end
+
+
+---------------------------------------------------------------------------------
+WAIT THIS DOESNT WORK!!!!!!!!!!
+
+This all sort of falls apart when you consider paths will cross through rooms,
+an ai could easily end up in a weird infinite loop, or at the very least may take
+an incredibly stupid suboptimal path!
+
+
+
+------------------
+
+Another idea.
+
+Each tile, contains a direction to every room via bitfields.
+    b00 = left
+    b01 = right
+    b10 = up
+    b11 = down
+
+On paper, if we have a max of 64 rooms (more likely to be 32), that means need 128bits (uint32x4)
+to represent every possible direction, which sounds pretty doable, and given the current atlas size
+is 128x128, seems not too horrible.
+
+When an ai needs to get to a tile, if it's id is the same, it can just do the crappy line walking
+logic.
+
+---
+
+Render each room with its id, render paths with no id, do a flood fill, so paths also recieve
+some form of id.
+jump flood every room, to every other room, leaving us with a vector field of directions to go.
+
+cant use jump flood, do line floods:
+    +x, +y, -y, -x, +x, +y, -y, -x ... N
+
+    use a bitfield per room, marking them as already seen
+    when filling, update mask based upon what the previous tiles have seen
+    if never seen before, write out the opposite direction we're travelling
+    clear collected bits when hitting a wall

@@ -11,20 +11,53 @@ layout(set=0, binding = 0) uniform GlobalParameters_
     GlobalParameters globals;
 }; 
 
-readonly layout(std430, binding = 1) buffer offsets_ { uint offsets[]; };
+readonly layout(std430, binding = 1) buffer splatCommands_ { uint splatCommands[]; };
 writeonly layout(std430, binding = 2) buffer indirectCommands_ { uint outIndirectCommands[]; };
 
 
 void main()
 {
     uint tid = gl_LocalInvocationID.x;
-    uint numOffsets = offsets[0];
-    if(tid < numOffsets)
+    uint numCommands = splatCommands[0];
+    uint splatCommandsOffset = 1;
+
+    for(uint commandIndex=0; commandIndex < numCommands; ++commandIndex)
     {
-        uint mask = offsets[1u + (tid * 4u)];
-        uint offset = offsets[2u + (tid * 4u)];
-        uint onTrue = offsets[3u + (tid * 4u)];
-        uint onFalse = offsets[4u + (tid * 4u)];
-        outIndirectCommands[offset] = ((mask & globals.pipelineStage) != 0u) ? onTrue : onFalse;
+        uint opAndNumEntries = splatCommands[splatCommandsOffset];
+        uint mask = splatCommands[splatCommandsOffset + 1u];
+        uint ref = PREVENT_BRANCH_LOADING(splatCommands[splatCommandsOffset + 2u]);
+        splatCommandsOffset += 3u;
+
+        uint op = opAndNumEntries & 7;
+        uint numEntries = opAndNumEntries >> 3;
+        uint maskedFlags = mask & globals.pipelineStage;
+        uint afterEntries = (2u * numEntries);
+        bool process = false;
+
+        switch(op)
+        {
+            case 0: { process = (maskedFlags == ref); break; }
+            case 1: { process = (maskedFlags != ref); break; }
+            case 2: { process = (maskedFlags <= ref); break; }
+            case 3: { process = (maskedFlags >= ref); break; }
+            case 4: { process = (maskedFlags > ref); break; }
+            case 5: { process = (maskedFlags < ref); break; }
+        }
+
+        if(process)
+        {
+            for(uint pairStart = 0; pairStart < afterEntries; pairStart += (32u * 2u))
+            {
+                uint entryOffset = splatCommandsOffset + pairStart + 2u * tid;
+                if(entryOffset < afterEntries)
+                {
+                    uint offset = splatCommands[splatCommandsOffset + entryOffset];
+                    uint value = splatCommands[splatCommandsOffset + entryOffset + 1u];
+                    outIndirectCommands[offset] = value;
+                }
+            }
+        }
+
+        splatCommandsOffset += afterEntries;
     }
 }

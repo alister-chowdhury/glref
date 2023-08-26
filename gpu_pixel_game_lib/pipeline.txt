@@ -1,5 +1,11 @@
 
 
+/// NB:
+///     Naga currently doesn't support atomics
+///     Tint doesn't support stores into integer images 
+
+
+
 Logical pipeline stages are used to control different stages of game logic, each stage
 can write the stage to be evaluated next frame.
 
@@ -123,3 +129,11 @@ Side node, maybe rather than having pipeline stages as a linear steps, it might 
 to have pipeline steps, which get activated, e.g:
 
 DRAW_MAIN_MENU_FLAG, LOAD_MAP_FLAG, ... etc
+
+
+
+//////
+
+
+
+

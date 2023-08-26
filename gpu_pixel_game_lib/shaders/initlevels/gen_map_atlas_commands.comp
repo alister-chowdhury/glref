@@ -1,7 +1,7 @@
 #version 460 core
 
 
-#define NUM_THREADS 64
+#define NUM_THREADS 32
 
 layout(local_size_x=NUM_THREADS) in;
 
@@ -39,7 +39,7 @@ struct DrawQueue
 };
 
 
-shared DrawQueue    bspQueue[NUM_THREADS/2];
+shared DrawQueue    bspQueue[NUM_THREADS];
 
 
 // Uses the last 23bits to construct a linear range
@@ -119,7 +119,7 @@ void main()
 
     // Keep splitting the BSP, and adding draw commands for paths
     // that connect both sides
-    for(uint it=1u; it<(NUM_THREADS/2); it<<=1)
+    for(uint it=1u; it<NUM_THREADS; it<<=1)
     {
         if(tid < it)
         {

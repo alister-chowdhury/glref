@@ -13,6 +13,7 @@ _ATLAS_NORM = os.path.abspath(os.path.join(__file__, "..", "ATLAS_NORM.png"))
 
 _FORCE_POWER_OF_TWO = True
 _BLOCK_SIZE = 1
+_X_ALIGNMENT = 4
 
 def _gather_texture_mapping():
     """Gather a mapping of textures to their respective layers.
@@ -134,6 +135,10 @@ def _calculate_placement(mappings):
             found = False
             for y in range(y_search_end):
                 for x in numpy.where(blocks[y, 0:x_search_end])[0]:
+
+                    if (x & (_X_ALIGNMENT) != 0):
+                        continue
+
                     if numpy.all(blocks[y:(y+num_y),x:(x+num_x)]):
                         blocks[y:(y+num_y),x:(x+num_x)] = False
                         mapping["coord"] = (y * _BLOCK_SIZE, x * _BLOCK_SIZE)
