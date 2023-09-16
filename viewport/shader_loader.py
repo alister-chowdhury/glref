@@ -1,3 +1,5 @@
+from OpenGL.GL import *
+
 import distutils.spawn
 import subprocess
 import re
@@ -6,10 +8,13 @@ import tempfile
 
 
 from .program import generate_shader_program
+from .message_box import askyesno
 
 
 _GLSLC_EXEC = distutils.spawn.find_executable("glslc")
 _SPIRV_CROSS_EXEC = distutils.spawn.find_executable("spirv-cross")
+
+_PERMUTATION_PROGRAMS = []
 
 
 class _PermutationProgram(object):
@@ -21,6 +26,15 @@ class _PermutationProgram(object):
             if debugging
             else optimize_shader_roundtrip
         ) 
+        self._permutations = {}
+        self._one = None
+        _PERMUTATION_PROGRAMS.append(self)
+
+    def clear(self):
+        if self._one:
+            glDeleteProgram(self._one)
+        for v in self._permutations.values():
+            glDeleteProgram(v)
         self._permutations = {}
         self._one = None
 
@@ -78,7 +92,40 @@ def optimize_shader_roundtrip(filepath, macros=None):
         if macros:
             for key, value in macros.items():
                 command.append("-D{0}={1}".format(key, value))
-        subprocess.check_call(command)
+        
+        while True:
+            proc = subprocess.Popen(
+                command,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                close_fds=True
+            )
+            stdout, stderr = proc.communicate()
+            if proc.returncode != 0:
+                message = "Commandline:\n{0}".format(
+                    subprocess.list2cmdline(command)
+                )
+                if stdout:
+                    message = "{0}\n\nSTDOUT:\n{1}".format(
+                        message,
+                        stdout.decode("latin-1").strip()
+                    )
+                if stderr:
+                    message = "{0}\n\nSTDERR:\n{1}".format(
+                        message,
+                        stderr.decode("latin-1").strip()
+                    )
+
+                message = "{0}\n\nRetry?".format(message)
+
+                retry = askyesno("Shader compiling failed", message)
+
+                if not retry:
+                    raise RuntimeError(
+                        "Shader compiling failed:\n{0}".format(message)
+                    )
+            else:
+                break
 
         command = [_SPIRV_CROSS_EXEC, tmp.name]
         result = subprocess.Popen(
@@ -140,3 +187,9 @@ def load_shader_source(filepath, macros=None):
 
 def make_permutation_program(debugging, **shader_type_filepaths):
     return _PermutationProgram(debugging, **shader_type_filepaths)
+
+
+def clear_compiled_shaders():
+    for program in _PERMUTATION_PROGRAMS:
+        program.clear()
+

@@ -294,7 +294,11 @@ class Renderer(object):
 
     def _keypress(self, wnd, key, x, y):
 
-        if key == b'n':
+        # CTRL-R
+        if key == b'\x12':
+            viewport.clear_compiled_shaders()
+
+        elif key == b'n':
             self._new_v ^= 1
         elif key == b'c':
             glDeleteBuffers(1, self._buffers_ptr)

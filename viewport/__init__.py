@@ -23,7 +23,8 @@ from . program import (
 from . shader_loader import (
     load_shader_source,
     optimize_shader_roundtrip,
-    make_permutation_program
+    make_permutation_program,
+    clear_compiled_shaders
 )
 
 from . window import Window
