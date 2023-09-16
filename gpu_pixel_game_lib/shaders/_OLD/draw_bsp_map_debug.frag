@@ -18,5 +18,9 @@ void main()
     {
         c = vec3(1.);
     }
+    // else if(v >= 31u)
+    // {
+    //     c = vec3(1.0);
+    // }
     value = vec4(c, 1.0);
 }

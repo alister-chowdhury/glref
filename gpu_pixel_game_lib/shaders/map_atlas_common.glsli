@@ -11,11 +11,18 @@
 #define MAP_ATLAS_WALL_DEPTH_WALL   0x0ff0
 #define MAP_ATLAS_WALL_DEPTH_FLOOR  0x0fe0
 
+#define MAX_ROOMS           32
 
 #define FINAL_ATLAS_WIDTH   128
 #define FINAL_ATLAS_HEIGHT  128
 
 #define MAX_LEVEL_DIM       64
+
+// There is always a 1px pading around the border
+// as a result when we're using shared memory, we
+// can limit the amount of resources needed.
+#define MAX_LEVEL_DIM_SHARED_SIZE   62
+#define MAX_LEVEL_DIM_SHARED_OFFSET 1
 
 #define ENTER_ROOM_ID       1
 #define EXIT_ROOM_ID        2

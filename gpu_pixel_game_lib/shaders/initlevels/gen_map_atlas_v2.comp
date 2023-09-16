@@ -2,7 +2,7 @@
 
 
 #define NUM_THREADS     64
-#define MAX_PATHS       (NUM_THREADS - 1)
+#define MAX_PATHS       (MAX_ROOMS - 1)
 
 
 layout(local_size_x=NUM_THREADS) in;
@@ -119,7 +119,7 @@ packed_bsp_t packBspNode(DrawQueue x)
     return packSpan(x.span);
 }
 
-shared packed_bsp_t  bspQueue[NUM_THREADS];
+shared packed_bsp_t  bspQueue[MAX_ROOMS];
 shared packed_span_t pathQueue[MAX_PATHS];
 
 
@@ -141,7 +141,7 @@ void generateBsp(uint tid, MapAtlasLevelInfo atlasInfo)
 
     // Keep splitting the BSP, and adding draw commands for paths
     // that connect both sides
-    for(uint it = 1u; it < NUM_THREADS; it <<= 1)
+    for(uint it = 1u; it < MAX_ROOMS; it <<= 1)
     {
         if(tid < it)
         {
@@ -220,16 +220,12 @@ void generateBsp(uint tid, MapAtlasLevelInfo atlasInfo)
 //  since we really won't ever need more than a byte
 //  per pixel, however it becomes slightly more akward
 //  with respect to syncronisation.
-//
-//  Currently, we're using `16384` bytes of shared mem
-//  on this alone, which is greater than maximum available
-//  on a lot of mobile chips (and even some desktop).
-shared uint renderScratch[MAX_LEVEL_DIM * MAX_LEVEL_DIM];
+shared uint renderScratch[MAX_LEVEL_DIM_SHARED_SIZE * MAX_LEVEL_DIM_SHARED_SIZE];
 
 
 uint sampleRenderScratch(uint offset)
 {
-    return offset < (MAX_LEVEL_DIM * MAX_LEVEL_DIM)
+    return offset < (MAX_LEVEL_DIM_SHARED_SIZE * MAX_LEVEL_DIM_SHARED_SIZE)
             ? renderScratch[offset]
             : 0u;
 }
@@ -238,14 +234,15 @@ uint sampleRenderScratch(uint offset)
 void renderBsp(uint tid, MapAtlasLevelInfo atlasInfo)
 {
     // Render paths + levels
-    for(uint it = tid; it < (MAX_LEVEL_DIM * MAX_LEVEL_DIM); it += NUM_THREADS)
+    for(uint it = tid; it < (MAX_LEVEL_DIM_SHARED_SIZE * MAX_LEVEL_DIM_SHARED_SIZE); it += NUM_THREADS)
     {
-        ivec2 localCoord = ivec2(uvec2(it % MAX_LEVEL_DIM, it / MAX_LEVEL_DIM));
+        ivec2 localCoord = ivec2(uvec2(it % MAX_LEVEL_DIM_SHARED_SIZE, it / MAX_LEVEL_DIM_SHARED_SIZE))
+                            + ivec2(MAX_LEVEL_DIM_SHARED_OFFSET);
 
         uint nextRoomId = 0;
         uint pixelId = 0u;
 
-        for(uint i=0; i<NUM_THREADS; ++i)
+        for(uint i=0; i<MAX_ROOMS; ++i)
         {
             ivec4 nodeSpan = unpackBspNode(bspQueue[i]).span;
             if(nodeSpan.x == nodeSpan.z) { continue; }
@@ -305,14 +302,14 @@ void renderBsp(uint tid, MapAtlasLevelInfo atlasInfo)
     //       pathSpan
     for(uint i=0; i<8u; ++i)
     {
-        for(uint it = 0; it < (MAX_LEVEL_DIM * MAX_LEVEL_DIM); it += NUM_THREADS)
+        for(uint it = 0; it < (MAX_LEVEL_DIM_SHARED_SIZE * MAX_LEVEL_DIM_SHARED_SIZE); it += NUM_THREADS)
         {
             uint pixelId = it + tid;
             uvec4 sides = uvec4(
                 sampleRenderScratch(pixelId + 1),
                 sampleRenderScratch(pixelId - 1),
-                sampleRenderScratch(pixelId + MAX_LEVEL_DIM),
-                sampleRenderScratch(pixelId - MAX_LEVEL_DIM)
+                sampleRenderScratch(pixelId + MAX_LEVEL_DIM_SHARED_SIZE),
+                sampleRenderScratch(pixelId - MAX_LEVEL_DIM_SHARED_SIZE)
             );
             uint self = sampleRenderScratch(pixelId);
             barrier();
@@ -336,9 +333,10 @@ void renderBsp(uint tid, MapAtlasLevelInfo atlasInfo)
     }
 
     // Write out to the final image
-    for(uint it = tid; it < (MAX_LEVEL_DIM * MAX_LEVEL_DIM); it += NUM_THREADS)
+    for(uint it = tid; it < (MAX_LEVEL_DIM_SHARED_SIZE * MAX_LEVEL_DIM_SHARED_SIZE); it += NUM_THREADS)
     {
-        uvec2 localCoord = uvec2(it % MAX_LEVEL_DIM, it / MAX_LEVEL_DIM);
+        uvec2 localCoord = uvec2(it % MAX_LEVEL_DIM_SHARED_SIZE, it / MAX_LEVEL_DIM_SHARED_SIZE)
+                         + uvec2(MAX_LEVEL_DIM_SHARED_OFFSET);
         if(localCoord.x < atlasInfo.size.x && localCoord.y < atlasInfo.size.y)
         {
             imageStore(mapAtlas,
