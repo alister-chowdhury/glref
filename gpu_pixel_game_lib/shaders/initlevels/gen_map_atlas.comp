@@ -138,6 +138,8 @@ void generateBsp(uint tid, MapAtlasLevelInfo atlasInfo)
     }
     barrier();
 
+    uint tidSeed = simpleHash32(uvec3(tid, atlasInfo.offset.x, atlasInfo.offset.y));
+
     // Keep splitting the BSP, and adding draw commands for paths
     // that connect both sides
     for(uint it = 1u; it < MAX_ROOMS; it <<= 1)
@@ -145,7 +147,7 @@ void generateBsp(uint tid, MapAtlasLevelInfo atlasInfo)
         if(tid < it)
         {
             DrawQueue parent = unpackBspNode(bspQueue[tid]);
-            uint splitSeed = simpleHash32(uvec3(globals.cpuRandom, it, tid));
+            uint splitSeed = simpleHash32(uvec3(globals.cpuRandom, it, tidSeed));
 
             DrawQueue left, right;
             uint splitDirection = bspSplit(parent, left, right, splitSeed);

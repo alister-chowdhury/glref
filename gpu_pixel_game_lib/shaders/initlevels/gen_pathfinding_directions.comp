@@ -1,8 +1,21 @@
 #version 460 core
 
 
-#define NUM_THREADS     64
+#define NUM_THREADS             64
 
+// I don't have an especially good basis for deriving this,
+// when manually testing, I've found that after 64 iterations
+// on the biggest 64x64 map, all paths are fully resolved.
+// The use of 128, is purely to be super-duper sure we have
+// reliably solved all possible paths.
+#define NUM_FLOOD_FILL_ITERS    128
+
+
+////////// its all super broken!
+
+
+
+#define HALF_MAX_LEVEL_DIM_SHARED_SIZE (MAX_LEVEL_DIM_SHARED_SIZE/2)
 
 layout(local_size_x=NUM_THREADS) in;
 
@@ -19,7 +32,7 @@ layout(set=0, binding = 0) uniform GlobalParameters_
 
 
 readonly layout(binding=1, r8ui)    uniform uimage2D mapAtlas;
-         layout(binding=2, rg8ui)   uniform uimage2D roomDirections;
+         layout(binding=2, rg32ui)   uniform uimage2D roomDirections;
 
 
 // This shader generates an atlas of directions to travel to get
@@ -41,11 +54,13 @@ readonly layout(binding=1, r8ui)    uniform uimage2D mapAtlas;
 shared uint roomPathMask[MAX_LEVEL_DIM_SHARED_SIZE * MAX_LEVEL_DIM_SHARED_SIZE];
 
 
-uint sampleRoomPathMask(int offset)
+uint sampleRoomPathMask(ivec2 coord)
 {
-    return (offset>= 0) && (offset < (MAX_LEVEL_DIM_SHARED_SIZE * MAX_LEVEL_DIM_SHARED_SIZE))
-            ? roomPathMask[offset]
-            : 0u;
+    if(min(coord.x, coord.y) >=0 && max(coord.x, coord.y) < MAX_LEVEL_DIM_SHARED_SIZE)
+    {
+        return roomPathMask[coord.x + coord.y * MAX_LEVEL_DIM_SHARED_SIZE];
+    }
+    return 0u;
 }
 
 
@@ -76,6 +91,7 @@ void init(uint tid, MapAtlasLevelInfo atlasInfo)
     barrier();
 }
 
+
 #if (MAX_LEVEL_DIM_SHARED_SIZE * MAX_LEVEL_DIM_SHARED_SIZE) > (NUM_THREADS * 64)
 #error "using uvec2 isn't enough storage space per pixel for valid pixel mask!"
 #endif // (MAX_LEVEL_DIM_SHARED_SIZE * MAX_LEVEL_DIM_SHARED_SIZE) > (NUM_THREADS * 64)// 
@@ -85,18 +101,18 @@ uvec2 generateValidPixelMask(uint tid)
     uvec2 validPixelMask = uvec2(0);
     uint i = 0;
 
-    for(uint it = tid; it < (MAX_LEVEL_DIM_SHARED_SIZE * MAX_LEVEL_DIM_SHARED_SIZE/2); it += NUM_THREADS, ++i)
+    for(uint it = tid; it < (MAX_LEVEL_DIM_SHARED_SIZE * HALF_MAX_LEVEL_DIM_SHARED_SIZE); it += NUM_THREADS, ++i)
     {
         // First checkerboard pattern
-        uvec2 coord0 = uvec2((it % (MAX_LEVEL_DIM_SHARED_SIZE/2)) * 2, it / MAX_LEVEL_DIM_SHARED_SIZE);
+        uvec2 coord0 = uvec2((it % HALF_MAX_LEVEL_DIM_SHARED_SIZE) * 2, it / HALF_MAX_LEVEL_DIM_SHARED_SIZE);
               coord0.x ^= (coord0.y & 1u);
 
         // Second checkerboard pattern
         uvec2 coord1 = coord0;
               coord1.x ^= 1u;
 
-        if(sampleRoomPathMask(int(coord0.y * MAX_LEVEL_DIM_SHARED_SIZE + coord0.x)) != 0u) { validPixelMask.x |= (1u << i); }
-        if(sampleRoomPathMask(int(coord1.y * MAX_LEVEL_DIM_SHARED_SIZE + coord1.x)) != 0u) { validPixelMask.y |= (1u << i); }
+        if(sampleRoomPathMask(ivec2(coord0)) != 0u) { validPixelMask.x |= (1u << i); }
+        if(sampleRoomPathMask(ivec2(coord1)) != 0u) { validPixelMask.y |= (1u << i); }
     }
 
     return validPixelMask;
@@ -137,22 +153,21 @@ void updateFromNeighbour(uint mask,
 
 void iterate(uint tid, MapAtlasLevelInfo atlasInfo, uint validPixelMask, uint checkboardSide)
 {
+    // validPixelMask = 0xffffu;
     while(validPixelMask != 0)
     {
         uint bit = findLSB(validPixelMask);
         validPixelMask -= (1u << bit);
         uint it = tid + NUM_THREADS * bit;
 
-        uvec2 coord = uvec2((it % (MAX_LEVEL_DIM_SHARED_SIZE/2)) * 2, it / MAX_LEVEL_DIM_SHARED_SIZE);
+        uvec2 coord = uvec2((it % HALF_MAX_LEVEL_DIM_SHARED_SIZE) * 2, it / HALF_MAX_LEVEL_DIM_SHARED_SIZE);
               coord.x ^= (coord.y & 1u) ^ checkboardSide;
 
-        int offset = int(coord.y * MAX_LEVEL_DIM_SHARED_SIZE + coord.y);
-
-        uint self = sampleRoomPathMask(offset);
-        uint left = sampleRoomPathMask(offset - 1);
-        uint right = sampleRoomPathMask(offset + 1);
-        uint down = sampleRoomPathMask(offset - MAX_LEVEL_DIM_SHARED_SIZE);
-        uint up = sampleRoomPathMask(offset + MAX_LEVEL_DIM_SHARED_SIZE);
+        uint self = sampleRoomPathMask(ivec2(coord));
+        uint left = sampleRoomPathMask(ivec2(coord) - ivec2(1, 0));
+        uint right = sampleRoomPathMask(ivec2(coord) + ivec2(1, 0));
+        uint down = sampleRoomPathMask(ivec2(coord) - ivec2(0, 1));
+        uint up = sampleRoomPathMask(ivec2(coord) + ivec2(0, 1));
 
         uint updated = self;
         uvec2 updatedDirection = uvec2(0);
@@ -162,19 +177,25 @@ void iterate(uint tid, MapAtlasLevelInfo atlasInfo, uint validPixelMask, uint ch
         updateFromNeighbour(up & updated, updated, updatedDirection, PATHFINDING_UP_MASK);
         updateFromNeighbour(down & updated, updated, updatedDirection, PATHFINDING_DOWN_MASK);
 
+        // updatedDirection |= validPixelMask;
+        updatedDirection *=0;
+        self = 0;
+        if(checkboardSide == 0) { updatedDirection.x = validPixelMask; }
+        else { updatedDirection.y = validPixelMask; }
+
         if(updated != self)
         {
-            ivec2 atlasOffset = ivec2(coord + atlasInfo.offset);
+            ivec2 atlasOffset = ivec2(coord + atlasInfo.offset + MAX_LEVEL_DIM_SHARED_OFFSET);
             updatedDirection |= uvec2(imageLoad(roomDirections, atlasOffset).xy);
             imageStore(roomDirections, atlasOffset, updatedDirection.xyxy);
-            roomPathMask[it] = updated;
+            // roomPathMask[it] = updated;
         }
     }
     barrier();
 }
 
 
-void main()
+void main2()
 {
     uint tid = gl_LocalInvocationID.x;
     MapAtlasLevelInfo atlasInfo = getLevelAtlasInfo(gl_GlobalInvocationID.z);
@@ -186,4 +207,308 @@ void main()
         iterate(tid, atlasInfo, validPixelMask.x, 0u);
         iterate(tid, atlasInfo, validPixelMask.y, 1u);
     }
+}
+
+
+void testCorrectAddress()
+{
+    uint tid = gl_LocalInvocationID.x;
+    MapAtlasLevelInfo atlasInfo = getLevelAtlasInfo(gl_GlobalInvocationID.z);
+    init(tid, atlasInfo);
+
+    uint i = 0;
+    for(uint it = tid; it < (MAX_LEVEL_DIM_SHARED_SIZE * HALF_MAX_LEVEL_DIM_SHARED_SIZE); it += NUM_THREADS, ++i)
+    {
+        // First checkerboard pattern
+        uvec2 coord0 = uvec2((it % HALF_MAX_LEVEL_DIM_SHARED_SIZE) * 2, it / HALF_MAX_LEVEL_DIM_SHARED_SIZE);
+              coord0.x ^= (coord0.y & 1u);
+
+        // Second checkerboard pattern
+        uvec2 coord1 = coord0;
+              coord1.x ^= 1u;
+
+        uint value0 = sampleRoomPathMask(ivec2(coord0));
+        uint value1 = sampleRoomPathMask(ivec2(coord1));
+
+        if(value0 != 0u)
+        {
+            ivec2 atlasOffset0 = ivec2(coord0 + atlasInfo.offset + MAX_LEVEL_DIM_SHARED_OFFSET);
+            imageStore(roomDirections, atlasOffset0, uvec4(tid, i, 0, 0));
+        }
+        if(value1 != 0u)
+        {
+            ivec2 atlasOffset1 = ivec2(coord1 + atlasInfo.offset + MAX_LEVEL_DIM_SHARED_OFFSET);
+            imageStore(roomDirections, atlasOffset1, uvec4(tid, i, 0, 0));
+        }
+    }
+}
+
+void testInitialRoom()
+{
+    uint tid = gl_LocalInvocationID.x;
+    MapAtlasLevelInfo atlasInfo = getLevelAtlasInfo(gl_GlobalInvocationID.z);
+    init(tid, atlasInfo);
+
+    uvec2 validPixelMask = generateValidPixelMask(tid);
+
+    uint i = 0;
+    for(uint it = tid; it < (MAX_LEVEL_DIM_SHARED_SIZE * HALF_MAX_LEVEL_DIM_SHARED_SIZE); it += NUM_THREADS, ++i)
+    {
+        // First checkerboard pattern
+        uvec2 coord0 = uvec2((it % HALF_MAX_LEVEL_DIM_SHARED_SIZE) * 2, it / HALF_MAX_LEVEL_DIM_SHARED_SIZE);
+              coord0.x ^= (coord0.y & 1u);
+
+        // Second checkerboard pattern
+        uvec2 coord1 = coord0;
+              coord1.x ^= 1u;
+
+        uint value0 = sampleRoomPathMask(ivec2(coord0));
+        uint value1 = sampleRoomPathMask(ivec2(coord1));
+
+        if(value0 != 0u)
+        {
+            ivec2 atlasOffset0 = ivec2(coord0 + atlasInfo.offset + MAX_LEVEL_DIM_SHARED_OFFSET);
+            imageStore(roomDirections, atlasOffset0, uvec4(value0, bitCount(validPixelMask.x), 0, 0));
+        }
+        if(value1 != 0u)
+        {
+            ivec2 atlasOffset1 = ivec2(coord1 + atlasInfo.offset + MAX_LEVEL_DIM_SHARED_OFFSET);
+            imageStore(roomDirections, atlasOffset1, uvec4(value1, bitCount(validPixelMask.y), 0, 0));
+        }
+    }
+}
+
+
+void testValidPixelMask()
+{
+    uint tid = gl_LocalInvocationID.x;
+    MapAtlasLevelInfo atlasInfo = getLevelAtlasInfo(gl_GlobalInvocationID.z);
+    init(tid, atlasInfo);
+
+    uvec2 validPixelMask = generateValidPixelMask(tid);
+
+    while(validPixelMask.x != 0u)
+    {
+        uint bit = findLSB(validPixelMask.x);
+        validPixelMask.x -= (1u << bit);
+        uint it = tid + bit * NUM_THREADS;
+
+        uvec2 coord0 = uvec2((it % HALF_MAX_LEVEL_DIM_SHARED_SIZE) * 2, it / HALF_MAX_LEVEL_DIM_SHARED_SIZE);
+              coord0.x ^= (coord0.y & 1u);
+
+        ivec2 atlasOffset0 = ivec2(coord0 + atlasInfo.offset + MAX_LEVEL_DIM_SHARED_OFFSET);
+        imageStore(roomDirections, atlasOffset0, uvec4(tid + 1));
+    }
+
+    while(validPixelMask.y != 0u)
+    {
+        uint bit = findLSB(validPixelMask.y);
+        validPixelMask.y -= (1u << bit);
+        uint it = tid + bit * NUM_THREADS;
+
+        uvec2 coord1 = uvec2((it % HALF_MAX_LEVEL_DIM_SHARED_SIZE) * 2, it / HALF_MAX_LEVEL_DIM_SHARED_SIZE);
+              coord1.x ^= (coord1.y & 1u) ^ 1u;
+
+        ivec2 atlasOffset1 = ivec2(coord1 + atlasInfo.offset + MAX_LEVEL_DIM_SHARED_OFFSET);
+        imageStore(roomDirections, atlasOffset1, uvec4(tid + 1));
+    }
+}
+
+
+void testValidFloodItCheck(uint tid, uint validPixelMask, uint side)
+{
+    while(validPixelMask != 0u)
+    {
+        uint bit = findLSB(validPixelMask);
+        validPixelMask -= (1u << bit);
+        uint it = tid + bit * NUM_THREADS;
+
+        uvec2 coord = uvec2((it % HALF_MAX_LEVEL_DIM_SHARED_SIZE) * 2, it / HALF_MAX_LEVEL_DIM_SHARED_SIZE);
+              coord.x ^= (coord.y & 1u) ^ side;
+
+        uint left = sampleRoomPathMask(ivec2(coord) - ivec2(1, 0));
+        uint self = sampleRoomPathMask(ivec2(coord));
+        uint right = sampleRoomPathMask(ivec2(coord) + ivec2(1, 0));
+        uint down = sampleRoomPathMask(ivec2(coord) - ivec2(0, 1));
+        uint up = sampleRoomPathMask(ivec2(coord) + ivec2(0, 1));
+
+        roomPathMask[coord.y * MAX_LEVEL_DIM_SHARED_SIZE + coord.x] = left | self | right | down | up;
+
+    }
+
+    barrier();
+}
+
+void testValidFloodIt(uint tid, uvec2 validPixelMask)
+{
+    testValidFloodItCheck(tid, validPixelMask.x, 0u);
+    testValidFloodItCheck(tid, validPixelMask.y, 1u);
+}
+
+void testValidFlood()
+{
+    uint tid = gl_LocalInvocationID.x;
+    MapAtlasLevelInfo atlasInfo = getLevelAtlasInfo(gl_GlobalInvocationID.z);
+    init(tid, atlasInfo);
+
+    uvec2 validPixelMask = generateValidPixelMask(tid);
+
+    for(uint i=0; i<NUM_FLOOD_FILL_ITERS; ++i)
+    {
+        testValidFloodIt(tid, validPixelMask);
+    }
+
+    while(validPixelMask.x != 0u)
+    {
+        uint bit = findLSB(validPixelMask.x);
+        validPixelMask.x -= (1u << bit);
+        uint it = tid + bit * NUM_THREADS;
+
+        uvec2 coord0 = uvec2((it % HALF_MAX_LEVEL_DIM_SHARED_SIZE) * 2, it / HALF_MAX_LEVEL_DIM_SHARED_SIZE);
+              coord0.x ^= (coord0.y & 1u);
+
+        uint value0 = sampleRoomPathMask(ivec2(coord0));
+
+        ivec2 atlasOffset0 = ivec2(coord0 + atlasInfo.offset + MAX_LEVEL_DIM_SHARED_OFFSET);
+        imageStore(roomDirections, atlasOffset0, uvec4(bitCount(value0)));
+    }
+
+    while(validPixelMask.y != 0u)
+    {
+        uint bit = findLSB(validPixelMask.y);
+        validPixelMask.y -= (1u << bit);
+        uint it = tid + bit * NUM_THREADS;
+
+        uvec2 coord1 = uvec2((it % HALF_MAX_LEVEL_DIM_SHARED_SIZE) * 2, it / HALF_MAX_LEVEL_DIM_SHARED_SIZE);
+              coord1.x ^= (coord1.y & 1u) ^ 1u;
+
+        uint value1 = sampleRoomPathMask(ivec2(coord1));
+
+        ivec2 atlasOffset1 = ivec2(coord1 + atlasInfo.offset + MAX_LEVEL_DIM_SHARED_OFFSET);
+        imageStore(roomDirections, atlasOffset1, uvec4(bitCount(value1)));
+    }
+}
+
+
+void testValidDirectionFloodItCheck(uint tid, MapAtlasLevelInfo atlasInfo, uint validPixelMask, uint side)
+{
+    while(validPixelMask != 0u)
+    {
+        uint bit = findLSB(validPixelMask);
+        validPixelMask -= (1u << bit);
+        uint it = tid + bit * NUM_THREADS;
+
+        uvec2 coord = uvec2((it % HALF_MAX_LEVEL_DIM_SHARED_SIZE) * 2, it / HALF_MAX_LEVEL_DIM_SHARED_SIZE);
+              coord.x ^= (coord.y & 1u) ^ side;
+
+        uint self = sampleRoomPathMask(ivec2(coord));
+        uint left = sampleRoomPathMask(ivec2(coord) + decodePathDirection(PATHFINDING_LEFT));
+        uint right = sampleRoomPathMask(ivec2(coord) + decodePathDirection(PATHFINDING_RIGHT));
+        uint down = sampleRoomPathMask(ivec2(coord) + decodePathDirection(PATHFINDING_DOWN));
+        uint up = sampleRoomPathMask(ivec2(coord) + decodePathDirection(PATHFINDING_UP));
+
+
+        if((self | left | up | down | right) == self)
+        {
+            continue;
+        }
+
+        uint updated = self;
+        uvec2 updatedDirection = uvec2(0);
+
+        uvec2 first = uvec2(left, PATHFINDING_LEFT_MASK);
+        uvec2 second = uvec2(right, PATHFINDING_RIGHT_MASK);
+        uvec2 third = uvec2(up, PATHFINDING_UP_MASK);
+        uvec2 fourth = uvec2(down, PATHFINDING_DOWN_MASK);
+
+        // Mix up the ordering a bit so we aren't biasing
+        // any one axis, otherwise it looks kinda weird.
+        //
+        // Could probably get away with just swapping X with Y.
+        uint shuffleSeed = simpleHash32(uvec3(globals.cpuRandom, it, self));
+
+        // if((shuffleSeed & 1u) != 0u)
+        // {
+        //     uvec2 tmp = first;
+        //     first = second;
+        //     second = tmp;
+        // }
+        // if((shuffleSeed & 2u) != 0u)
+        // {
+        //     uvec2 tmp = third;
+        //     third = fourth;
+        //     fourth = tmp;
+        // }
+        // if((shuffleSeed & 4u) != 0u)
+        // {
+        //     uvec2 tmp = first;
+        //     first = third;
+        //     third = tmp;
+        // }
+        // if((shuffleSeed & 8u) != 0u)
+        // {
+        //     uvec2 tmp = second;
+        //     second = fourth;
+        //     fourth = tmp;
+        // }
+
+        // if(side == 0u)
+        // {
+        //     uvec4 tmp = uvec4(first, second);
+        //     first = third;
+        //     second = fourth;
+        //     third = tmp.xy;
+        //     fourth = tmp.zw;
+        // }
+
+        updateFromNeighbour(first.x & ~updated, updated, updatedDirection, first.y);
+        updateFromNeighbour(second.x & ~updated, updated, updatedDirection, second.y);
+        updateFromNeighbour(third.x & ~updated, updated, updatedDirection, third.y);
+        updateFromNeighbour(fourth.x & ~updated, updated, updatedDirection, fourth.y);
+
+        if(updated != self)
+        {
+            // updatedDirection.x = updated;
+            // updatedDirection.y = self;
+            ivec2 atlasOffset = ivec2(coord + atlasInfo.offset + MAX_LEVEL_DIM_SHARED_OFFSET);
+            updatedDirection |= imageLoad(roomDirections, atlasOffset).xy;
+            // updatedDirection.y = (updated - self);
+            imageStore(roomDirections, atlasOffset, updatedDirection.xyxy);
+            roomPathMask[coord.y * MAX_LEVEL_DIM_SHARED_SIZE + coord.x] = updated;
+        }
+
+    }
+
+    barrier();
+}
+
+
+void testValidDirectionFloodIt(uint tid, MapAtlasLevelInfo atlasInfo, uvec2 validPixelMask)
+{
+    testValidDirectionFloodItCheck(tid, atlasInfo, validPixelMask.x, 0u);
+    testValidDirectionFloodItCheck(tid, atlasInfo, validPixelMask.y, 1u);
+}
+
+void testValidDirectionFlood()
+{
+    uint tid = gl_LocalInvocationID.x;
+    MapAtlasLevelInfo atlasInfo = getLevelAtlasInfo(gl_GlobalInvocationID.z);
+    init(tid, atlasInfo);
+
+    uvec2 validPixelMask = generateValidPixelMask(tid);
+
+    for(uint i=0; i<NUM_FLOOD_FILL_ITERS; ++i)
+    {
+        testValidDirectionFloodIt(tid, atlasInfo, validPixelMask);
+    }
+}
+
+
+void main()
+{
+    // testCorrectAddress();
+    // testInitialRoom();
+    // testValidPixelMask();
+    // testValidFlood();
+    testValidDirectionFlood();
 }

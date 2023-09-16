@@ -8,13 +8,47 @@
 // The limitations of this are that we never really know the total distance
 
 #define PATHFINDING_LEFT    0
-#define PATHFINDING_UP      1
+#define PATHFINDING_DOWN    1
 #define PATHFINDING_RIGHT   2
-#define PATHFINDING_DOWN    3
+#define PATHFINDING_UP      3
 
 #define PATHFINDING_LEFT_MASK    0
-#define PATHFINDING_UP_MASK      0x55555555
+#define PATHFINDING_DOWN_MASK    0x55555555
 #define PATHFINDING_RIGHT_MASK   0xaaaaaaaa
-#define PATHFINDING_DOWN_MASK    0xffffffff
+#define PATHFINDING_UP_MASK      0xffffffff
+
+
+ivec2 decodePathDirection(uint idx)
+{
+    // .x =-1  0, 1, 0
+    // .y = 0,-1, 0, 1
+    // Either [LEFT, DOWN] or [RIGHT, UP]
+    int side = -1 + int(idx & 2u);
+    // 0 = x, 1 = y
+    uint axis = idx & 1u;
+    return axis == 0u ? ivec2(side, 0) : ivec2(0, side); 
+}
+
+
+uint extractDirectionToRoom(uvec2 mask,
+                            uint roomId)
+{
+    if(roomId >= 16u)
+    {
+        mask.x = mask.y;
+        roomId -= 16u;
+    }
+    return (mask.x >> (roomId * 2u)) & 3u;
+}
+
+
+// glslc complains about passing uimage2D as a parameter,
+// wanting it to be read only.
+#define getDirectionToRoom(/* uimage2D */ roomDirectionsImage,\
+                           /* ivec2 */ globalCoord,\
+                           /* uint */ roomId)\
+        extractDirectionToRoom(imageLoad(roomDirectionsImage, globalCoord).xy,\
+                               roomId)
+
 
 #endif // PATHFINDING_COMMON_GLSLI

@@ -59,6 +59,11 @@ _GEN_PATHFINDING_DIRECTIONS_PROGRAM = viewport.make_permutation_program(
     GL_COMPUTE_SHADER = gpu_pixel_game_lib.GEN_PATHFINDING_DIRECTIONS_COMP
 )
 
+_DEBUG_VIS_PATHFINDING_DIRECTIONS_PROGRAM = viewport.make_permutation_program(
+    _DEBUGGING,
+    GL_VERTEX_SHADER = gpu_pixel_game_lib.DEBUG_VIS_PATHFINDING_DIRECTIONS_VERT,
+    GL_FRAGMENT_SHADER = gpu_pixel_game_lib.DEBUG_VIS_PATHFINDING_DIRECTIONS_FRAG
+)
 
 LEVEL_TILES_X = 128
 LEVEL_TILES_Y = 128
@@ -78,7 +83,8 @@ class Renderer(object):
         self.window.on_keypress = self._keypress
 
         self._n = 0
-        self._new_v = 1
+        self._vis_pf_level = 0
+        self._vis_pf_room = 0
 
     def run(self):
         self.window.run()
@@ -194,8 +200,8 @@ class Renderer(object):
 
         glTextureParameteri(self._pathfinding_directions, GL_TEXTURE_WRAP_S, GL_REPEAT)
         glTextureParameteri(self._pathfinding_directions, GL_TEXTURE_WRAP_T, GL_REPEAT)
-        glTextureParameteri(self._pathfinding_directions, GL_TEXTURE_MIN_FILTER, GL_LINEAR)
-        glTextureParameteri(self._pathfinding_directions, GL_TEXTURE_MAG_FILTER, GL_LINEAR)
+        glTextureParameteri(self._pathfinding_directions, GL_TEXTURE_MIN_FILTER, GL_NEAREST)
+        glTextureParameteri(self._pathfinding_directions, GL_TEXTURE_MAG_FILTER, GL_NEAREST)
         glTextureStorage2D(
             self._pathfinding_directions,
             1,
@@ -220,7 +226,7 @@ class Renderer(object):
 
         glUseProgram(_GEN_MAP_ATLAS_PROGRAM.one())
         glBindBufferBase(GL_UNIFORM_BUFFER, 0, self._global_parameters2)
-        glBindImageTexture(1, self._map_atlas_tiles.texture, 0, False, 0, GL_READ_ONLY, GL_R8UI)
+        glBindImageTexture(1, self._map_atlas_tiles.texture, 0, False, 0, GL_WRITE_ONLY, GL_R8UI)
         glDispatchCompute(1, 1, 8)
         glMemoryBarrier(GL_SHADER_STORAGE_BARRIER_BIT | GL_SHADER_IMAGE_ACCESS_BARRIER_BIT)
 
@@ -233,38 +239,47 @@ class Renderer(object):
 
         glUseProgram(_DRAW_BSP_MAP_DEBUG_PROGRAM.get(VS_OUTPUT_UV=0))
         glBindTextureUnit(0, self._map_atlas_tiles.texture)
+        # glBindTextureUnit(0, self._pathfinding_directions)
         glBindVertexArray(viewport.get_dummy_vao())
         glDrawArrays(GL_TRIANGLES, 0, 3)
 
-        glMemoryBarrier(GL_SHADER_IMAGE_ACCESS_BARRIER_BIT)
-        glUseProgram(_GENERATE_MAP_LINES_PROGRAM.one())
-        glBindBufferBase(GL_UNIFORM_BUFFER, 0, self._global_parameters)
+        glUseProgram(_DEBUG_VIS_PATHFINDING_DIRECTIONS_PROGRAM.one())
+        glBindBufferBase(GL_UNIFORM_BUFFER, 0, self._global_parameters2)
         glBindImageTexture(1, self._map_atlas_tiles.texture, 0, False, 0, GL_READ_ONLY, GL_R8UI)
-        glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 2, self._draw_allocator)
-        glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 3, self._generated_lines)
-        glDispatchCompute(1, 1, 1)
+        glBindImageTexture(2, self._pathfinding_directions, 0, False, 0, GL_READ_ONLY, GL_RG32UI)
+        glUniform2ui(0, self._vis_pf_level, self._vis_pf_room)
+        glDrawArrays(GL_TRIANGLES, 0, 64 * 64 * 6)
 
-        glMemoryBarrier(GL_SHADER_STORAGE_BARRIER_BIT)
-        glUseProgram(_DRAW_LINES_DEBUG_PROGRAM.one())
-        glBindBufferBase(GL_UNIFORM_BUFFER, 0, self._global_parameters)
-        glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 1, self._generated_lines)
-        glBindVertexArray(viewport.get_dummy_vao())
-        glBindBuffer(GL_DRAW_INDIRECT_BUFFER, self._draw_allocator)
-        glDrawArraysIndirect(GL_LINES, ctypes.c_void_p(0))
+        if False:
+            glMemoryBarrier(GL_SHADER_IMAGE_ACCESS_BARRIER_BIT)
+            glUseProgram(_GENERATE_MAP_LINES_PROGRAM.one())
+            glBindBufferBase(GL_UNIFORM_BUFFER, 0, self._global_parameters)
+            glBindImageTexture(1, self._map_atlas_tiles.texture, 0, False, 0, GL_READ_ONLY, GL_R8UI)
+            glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 2, self._draw_allocator)
+            glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 3, self._generated_lines)
+            glDispatchCompute(1, 1, 1)
 
-        glUseProgram(_GENERATE_MAP_BVH_V2_PROGRAM.one())
-        glBindBufferBase(GL_UNIFORM_BUFFER, 0, self._global_parameters)
-        glBindBufferBase(GL_UNIFORM_BUFFER, 1, self._gen_bvh_params_buffer)
-        glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 2, self._lines_buffer)
-        glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 3, self._bvh_buffer)
-        glDispatchCompute(1, 1, 1)
+            glMemoryBarrier(GL_SHADER_STORAGE_BARRIER_BIT)
+            glUseProgram(_DRAW_LINES_DEBUG_PROGRAM.one())
+            glBindBufferBase(GL_UNIFORM_BUFFER, 0, self._global_parameters)
+            glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 1, self._generated_lines)
+            glBindVertexArray(viewport.get_dummy_vao())
+            glBindBuffer(GL_DRAW_INDIRECT_BUFFER, self._draw_allocator)
+            glDrawArraysIndirect(GL_LINES, ctypes.c_void_p(0))
 
-        # Super broken, we need to start again from scratch really..
-        glMemoryBarrier(GL_SHADER_STORAGE_BARRIER_BIT)
-        glUseProgram(_DRAW_BVH_DEBUG_PROGRAM.one())
-        glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 0, self._bvh_buffer)
-        glBindVertexArray(viewport.get_dummy_vao())
-        glDrawArrays(GL_LINES, 0, 16 * 63)
+            glUseProgram(_GENERATE_MAP_BVH_V2_PROGRAM.one())
+            glBindBufferBase(GL_UNIFORM_BUFFER, 0, self._global_parameters)
+            glBindBufferBase(GL_UNIFORM_BUFFER, 1, self._gen_bvh_params_buffer)
+            glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 2, self._lines_buffer)
+            glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 3, self._bvh_buffer)
+            glDispatchCompute(1, 1, 1)
+
+            # Super broken, we need to start again from scratch really..
+            glMemoryBarrier(GL_SHADER_STORAGE_BARRIER_BIT)
+            glUseProgram(_DRAW_BVH_DEBUG_PROGRAM.one())
+            glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 0, self._bvh_buffer)
+            glBindVertexArray(viewport.get_dummy_vao())
+            glDrawArrays(GL_LINES, 0, 16 * 63)
 
         wnd.redraw()
 
@@ -277,6 +292,22 @@ class Renderer(object):
         # CTRL-R
         if key == b'\x12':
             viewport.clear_compiled_shaders()
+
+        elif key == b'l':
+            self._vis_pf_level = (self._vis_pf_level + 1) & 7
+            print("Level =", self._vis_pf_level)
+        # ctrl+l
+        elif key == b'\x0c':
+            self._vis_pf_level = 0
+            print("Level =", self._vis_pf_level)
+
+        elif key == b'o':
+            self._vis_pf_room = (self._vis_pf_room + 1) & 31
+            print("Room =", self._vis_pf_room)
+        # ctrl+o
+        elif key == b'\x0f':
+            self._vis_pf_room = 0
+            print("Room =", self._vis_pf_room)
 
         elif key == b'c':
             glDeleteBuffers(1, self._buffers_ptr)
