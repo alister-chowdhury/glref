@@ -1,0 +1,20 @@
+#ifndef PATHFINDING_COMMON_GLSLI
+#define PATHFINDING_COMMON_GLSLI
+
+
+// Rather than using A* and friends, we store a series of directions,
+// 2 bits per room, (LEFT, UP, RIGHT, DOWN), so when it comes to updating
+// the AI, it's basically O(1).
+// The limitations of this are that we never really know the total distance
+
+#define PATHFINDING_LEFT    0
+#define PATHFINDING_UP      1
+#define PATHFINDING_RIGHT   2
+#define PATHFINDING_DOWN    3
+
+#define PATHFINDING_LEFT_MASK    0
+#define PATHFINDING_UP_MASK      0x55555555
+#define PATHFINDING_RIGHT_MASK   0xaaaaaaaa
+#define PATHFINDING_DOWN_MASK    0xffffffff
+
+#endif // PATHFINDING_COMMON_GLSLI

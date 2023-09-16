@@ -222,9 +222,9 @@ void generateBsp(uint tid, MapAtlasLevelInfo atlasInfo)
 shared uint renderScratch[MAX_LEVEL_DIM_SHARED_SIZE * MAX_LEVEL_DIM_SHARED_SIZE];
 
 
-uint sampleRenderScratch(uint offset)
+uint sampleRenderScratch(int offset)
 {
-    return offset < (MAX_LEVEL_DIM_SHARED_SIZE * MAX_LEVEL_DIM_SHARED_SIZE)
+    return (offset>= 0) && (offset < (MAX_LEVEL_DIM_SHARED_SIZE * MAX_LEVEL_DIM_SHARED_SIZE))
             ? renderScratch[offset]
             : 0u;
 }
@@ -303,7 +303,7 @@ void renderBsp(uint tid, MapAtlasLevelInfo atlasInfo)
     {
         for(uint it = 0; it < (MAX_LEVEL_DIM_SHARED_SIZE * MAX_LEVEL_DIM_SHARED_SIZE); it += NUM_THREADS)
         {
-            uint pixelId = it + tid;
+            int pixelId = int(it + tid);
             uvec4 sides = uvec4(
                 sampleRenderScratch(pixelId + 1),
                 sampleRenderScratch(pixelId - 1),

@@ -21,5 +21,6 @@ DRAW_BVH_DEBUG_FRAG = os.path.join(_OLD_SHADER_DIR, "draw_bvh_debug.frag")
 
 
 
-GEN_MAP_ATLAS_V2_COMP = os.path.join(_SHADER_DIR, "initlevels", "gen_map_atlas_v2.comp")
+GEN_MAP_ATLAS_COMP = os.path.join(_SHADER_DIR, "initlevels", "gen_map_atlas.comp")
+GEN_PATHFINDING_DIRECTIONS_COMP = os.path.join(_SHADER_DIR, "initlevels", "gen_pathfinding_directions.comp")
 

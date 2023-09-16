@@ -118,6 +118,7 @@ def optimize_shader_roundtrip(filepath, macros=None):
 
                 message = "{0}\n\nRetry?".format(message)
 
+                print(message)
                 retry = askyesno("Shader compiling failed", message)
 
                 if not retry:
