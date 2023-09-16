@@ -20,19 +20,6 @@ _DRAW_FULL_SCREEN_PATH = os.path.join(
 )
 
 
-_GENERATE_MAP_BSP_COMMANDS_PROGRAM = viewport.make_permutation_program(
-    _DEBUGGING,
-    GL_COMPUTE_SHADER = gpu_pixel_game_lib.GENERATE_MAP_BSP_COMMANDS_COMP
-)
-
-
-_GENERATE_MAP_BSP_PROGRAM = viewport.make_permutation_program(
-    _DEBUGGING,
-    GL_VERTEX_SHADER = gpu_pixel_game_lib.GENERATE_MAP_BSP_DRAW_VERT,
-    GL_FRAGMENT_SHADER = gpu_pixel_game_lib.GENERATE_MAP_BSP_DRAW_FRAG
-)
-
-
 _DRAW_LINES_DEBUG_PROGRAM = viewport.make_permutation_program(
     _DEBUGGING,
     GL_VERTEX_SHADER = gpu_pixel_game_lib.DRAW_LINES_DEBUG_VERT,
@@ -49,12 +36,6 @@ _DRAW_BSP_MAP_DEBUG_PROGRAM = viewport.make_permutation_program(
 _GENERATE_MAP_LINES_PROGRAM = viewport.make_permutation_program(
     _DEBUGGING,
     GL_COMPUTE_SHADER = gpu_pixel_game_lib.GENERATE_MAP_LINES_COMP
-)
-
-
-_GENERATE_MAP_BVH_PROGRAM___WIP = viewport.make_permutation_program(
-    _DEBUGGING,
-    GL_COMPUTE_SHADER = gpu_pixel_game_lib.GENERATE_MAP_BVH_COMP____WIP
 )
 
 _GENERATE_MAP_BVH_V2_PROGRAM = viewport.make_permutation_program(
@@ -164,6 +145,7 @@ class Renderer(object):
         glNamedBufferStorage(self._bvh_buffer, 4 * 4 * 3 * 189 + 1024 * 4, None, 0)
         glNamedBufferStorage(self._generated_lines, 4 * 1024, None, 0)
 
+
         self._map_atlas_tiles = viewport.FramebufferTarget(GL_R8UI, True)
         self._map_atlas_depth = viewport.FramebufferTarget(GL_DEPTH_COMPONENT32F, True)
         self._map_atlas_fb = viewport.Framebuffer(
@@ -208,34 +190,11 @@ class Renderer(object):
     def _draw(self, wnd):
         glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT)
 
-
-        if self._new_v:
-            glUseProgram(_GEN_MAP_ATLAS_V2_PROGRAM.one())
-            glBindBufferBase(GL_UNIFORM_BUFFER, 0, self._global_parameters2)
-            glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 1, self._map_atlas_tiles.texture)
-            glDispatchCompute(1, 1, 8)
-            glMemoryBarrier(GL_SHADER_STORAGE_BARRIER_BIT)
-            
-        else:
-            # Should be indirect draw later
-            glUseProgram(_GENERATE_MAP_BSP_COMMANDS_PROGRAM.one())
-            glBindBufferBase(GL_UNIFORM_BUFFER, 0, self._global_parameters)
-            glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 1, self._draw_commands)
-            glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 2, self._draw_allocator)
-            glDispatchCompute(1, 1, 1)
-
-            glMemoryBarrier(GL_SHADER_STORAGE_BARRIER_BIT)
-            with self._map_atlas_fb.bind():
-                glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT)
-                glViewport(0, 0, 128, 128)
-                glUseProgram(_GENERATE_MAP_BSP_PROGRAM.get())
-                glBindBufferBase(GL_UNIFORM_BUFFER, 0, self._global_parameters)
-                glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 1, self._draw_commands)
-                glBindVertexArray(viewport.get_dummy_vao())
-                glBindBuffer(GL_DRAW_INDIRECT_BUFFER, self._draw_allocator)
-                glDrawArraysIndirect(GL_TRIANGLES, ctypes.c_void_p(0))
-            glViewport(0, 0, wnd.width, wnd.height)
-            glMemoryBarrier(GL_FRAMEBUFFER_BARRIER_BIT)
+        glUseProgram(_GEN_MAP_ATLAS_V2_PROGRAM.one())
+        glBindBufferBase(GL_UNIFORM_BUFFER, 0, self._global_parameters2)
+        glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 1, self._map_atlas_tiles.texture)
+        glDispatchCompute(1, 1, 8)
+        glMemoryBarrier(GL_SHADER_STORAGE_BARRIER_BIT)
 
         glUseProgram(_DRAW_BSP_MAP_DEBUG_PROGRAM.get(VS_OUTPUT_UV=0))
         glBindTextureUnit(0, self._map_atlas_tiles.texture)
@@ -258,26 +217,12 @@ class Renderer(object):
         glBindBuffer(GL_DRAW_INDIRECT_BUFFER, self._draw_allocator)
         glDrawArraysIndirect(GL_LINES, ctypes.c_void_p(0))
 
-
-        # Broke af
-        if False:
-            glUseProgram(_GENERATE_MAP_BVH_PROGRAM___WIP.one())
-            glBindBufferBase(GL_UNIFORM_BUFFER, 0, self._global_parameters)
-            glBindBufferBase(GL_UNIFORM_BUFFER, 1, self._gen_bvh_params_buffer)
-            glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 2, self._lines_buffer)
-            glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 3, self._bvh_buffer)
-            glDispatchCompute(1, 1, 1)
-        else:
-
-            # SOMETHING ABOUT THIS SEEMS TO BREAK THE REST OF THE PIPELINE
-            # ON BOTH INTEL AND NVIDIA?!!!
-            # WE SHOULD BE ABLE TO DO THIS IN ANY ORDER!?
-            glUseProgram(_GENERATE_MAP_BVH_V2_PROGRAM.one())
-            glBindBufferBase(GL_UNIFORM_BUFFER, 0, self._global_parameters)
-            glBindBufferBase(GL_UNIFORM_BUFFER, 1, self._gen_bvh_params_buffer)
-            glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 2, self._lines_buffer)
-            glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 3, self._bvh_buffer)
-            glDispatchCompute(1, 1, 1)
+        glUseProgram(_GENERATE_MAP_BVH_V2_PROGRAM.one())
+        glBindBufferBase(GL_UNIFORM_BUFFER, 0, self._global_parameters)
+        glBindBufferBase(GL_UNIFORM_BUFFER, 1, self._gen_bvh_params_buffer)
+        glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 2, self._lines_buffer)
+        glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 3, self._bvh_buffer)
+        glDispatchCompute(1, 1, 1)
 
         # Super broken, we need to start again from scratch really..
         glMemoryBarrier(GL_SHADER_STORAGE_BARRIER_BIT)
@@ -298,8 +243,6 @@ class Renderer(object):
         if key == b'\x12':
             viewport.clear_compiled_shaders()
 
-        elif key == b'n':
-            self._new_v ^= 1
         elif key == b'c':
             glDeleteBuffers(1, self._buffers_ptr)
             glCreateBuffers(1, self._buffers_ptr)
