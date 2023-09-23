@@ -94,4 +94,31 @@ MapAtlasLevelInfo getLevelAtlasInfo(uint level)
 }
 
 
+// We store a maximum of 4 sectors per pixel, each
+// using 8 bits, with the maximum value being 64.
+
+uvec4 unpackSectorIds(uint atlasMask)
+{
+    return uvec4((atlasMask      ) & 0xffu,
+                 (atlasMask >> 8 ) & 0xffu,
+                 (atlasMask >> 16) & 0xffu,
+                  atlasMask >> 24);
+}
+
+bool containsSingleSector(uint atlasMask,
+                          uint sectorId)
+{
+    // We can use a zero byte in word test, to accelerate
+    // testing:
+    // https://graphics.stanford.edu/~seander/bithacks.html#ZeroInWord
+    sectorId *= 0x01010101u;
+    atlasMask ^= sectorId;
+    atlasMask = ((atlasMask + 0x7efefeffu) ^ ~atlasMask) & 0x81010100u;
+    // the 0x80 bit is never signed (we never have 128 sectors)
+    // so we don't need to test for overflow.
+    return atlasMask != 0u;
+}
+
+
+
 #endif // MAP_ATLAS_COMMON_GLSLI

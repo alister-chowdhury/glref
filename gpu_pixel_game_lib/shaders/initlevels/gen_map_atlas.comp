@@ -1,6 +1,17 @@
 #version 460 core
 
 
+
+/*
+
+    So something seems wrong with seed=0, level=7, room=2
+    It looks like a barrier issue, due to part of the room looking like
+    it was not written completely.
+
+    Happens on INTEL, doesn't seem to happen on NVIDIA.
+    Generates correctly when captures with renderdoc.
+*/
+
 #define NUM_THREADS     64
 #define MAX_PATHS       (MAX_ROOMS - 1)
 
@@ -18,7 +29,7 @@ layout(set=0, binding = 0) uniform GlobalParameters_
 }; 
 
 
-writeonly layout(binding=1, r8ui) uniform uimage2D mapAtlas;
+writeonly layout(binding=1, r32ui) uniform uimage2D mapAtlas;
 
 
 // Uses the last 23bits to construct a linear range
@@ -216,22 +227,6 @@ void generateBsp(uint tid, MapAtlasLevelInfo atlasInfo)
 }
 
 
-// TODO: We _should_ actually store this as:
-//  MAX_LEVEL_DIM x (MAX_LEVEL_DIM / 4)
-//  since we really won't ever need more than a byte
-//  per pixel, however it becomes slightly more akward
-//  with respect to syncronisation.
-shared uint renderScratch[MAX_LEVEL_DIM_SHARED_SIZE * MAX_LEVEL_DIM_SHARED_SIZE];
-
-
-uint sampleRenderScratch(int offset)
-{
-    return (offset>= 0) && (offset < (MAX_LEVEL_DIM_SHARED_SIZE * MAX_LEVEL_DIM_SHARED_SIZE))
-            ? renderScratch[offset]
-            : 0u;
-}
-
-
 void renderBsp(uint tid, MapAtlasLevelInfo atlasInfo)
 {
     // Render paths + levels
@@ -240,110 +235,64 @@ void renderBsp(uint tid, MapAtlasLevelInfo atlasInfo)
         ivec2 localCoord = ivec2(uvec2(it % MAX_LEVEL_DIM_SHARED_SIZE, it / MAX_LEVEL_DIM_SHARED_SIZE))
                             + ivec2(MAX_LEVEL_DIM_SHARED_OFFSET);
 
-        uint nextRoomId = 0;
+        if(!(localCoord.x < atlasInfo.size.x && localCoord.y < atlasInfo.size.y))
+        {
+            continue;
+        }
+
+        uint nextSectorId = 0u;
         uint pixelId = 0u;
 
         for(uint i=0; i<MAX_ROOMS; ++i)
         {
             ivec4 nodeSpan = unpackBspNode(bspQueue[i]).span;
             if(nodeSpan.x == nodeSpan.z) { continue; }
-            uint roomId = ++nextRoomId;
+            uint sectorId = ++nextSectorId;
+
+            // Already found the room under this pixel, at this point
+            // we're just counting the number of valid rooms
+            if(pixelId != 0u) { continue; }
 
             // Ok for reasons I dont know, if I remove this, it seems to draw
             // this incorrectly, probably some missing barrier?
             // (Only happening on intel???)
 
-            // uint lastRoomId = 2u;
-            // if(roomId == 1) { roomId = lastRoomId; }
-            // else if(roomId == lastRoomId) { roomId = 1u; }
+            // uint lastsectorId = 2u;
+            // if(sectorId == 1) { sectorId = lastsectorId; }
+            // else if(sectorId == lastsectorId) { sectorId = 1u; }
             
             // Ensure the enter/exit room are reasonably far away.
             //
             // Does a reasonably good job of seperating the start
             // and end rooms.
-            uint lastRoomId = 4u;
-            if(roomId == EXIT_ROOM_ID) { roomId = lastRoomId; }
-            else if(roomId == lastRoomId) { roomId = EXIT_ROOM_ID; }
-            
+            uint lastsectorId = 4u;
+            if(sectorId == EXIT_ROOM_ID) { sectorId = lastsectorId; }
+            else if(sectorId == lastsectorId) { sectorId = EXIT_ROOM_ID; }
 
             if(localCoord.x >= nodeSpan.x && localCoord.x < nodeSpan.z
                 && localCoord.y >= nodeSpan.y && localCoord.y < nodeSpan.w)
             {
-                pixelId = roomId;
-                break;
+                pixelId = sectorId;
             }
         }
 
-        if(pixelId == 0u)
+        for(uint i=0; i<MAX_PATHS; ++i)
         {
-            for(uint i=0; i<MAX_PATHS; ++i)
+            ivec4 pathSpan = unpackSpan(pathQueue[i]);
+            if(pathSpan.x == pathSpan.z) { continue; }
+
+            uint sectorId = ++nextSectorId;
+
+            if(localCoord.x >= pathSpan.x && localCoord.x < pathSpan.z
+                && localCoord.y >= pathSpan.y && localCoord.y < pathSpan.w)
             {
-                ivec4 pathSpan = unpackSpan(pathQueue[i]);
-                if(pathSpan.x == pathSpan.z) { continue; }
-
-                if(localCoord.x >= pathSpan.x && localCoord.x < pathSpan.z
-                    && localCoord.y >= pathSpan.y && localCoord.y < pathSpan.w)
-                {
-                    pixelId = 0xffu;
-                    break;
-                }
-            }            
-        }
-
-        renderScratch[it] = pixelId;
-    }
-    barrier();
-
-
-    // Flood fill the nearest ids for paths, so
-    // they semantically become part of the room.
-    // TODO: curretly doing 1pix at a time, which isn't great.
-    // TODO: we should be able to limit the amount of pixels
-    //       for consideration based upon the pixels within
-    //       pathSpan
-    for(uint i=0; i<8u; ++i)
-    {
-        for(uint it = 0; it < (MAX_LEVEL_DIM_SHARED_SIZE * MAX_LEVEL_DIM_SHARED_SIZE); it += NUM_THREADS)
-        {
-            int pixelId = int(it + tid);
-            uvec4 sides = uvec4(
-                sampleRenderScratch(pixelId + 1),
-                sampleRenderScratch(pixelId - 1),
-                sampleRenderScratch(pixelId + MAX_LEVEL_DIM_SHARED_SIZE),
-                sampleRenderScratch(pixelId - MAX_LEVEL_DIM_SHARED_SIZE)
-            );
-            uint self = sampleRenderScratch(pixelId);
-            barrier();
-
-            if(self == 0xffu)
-            {
-                uint found = 0u;
-                if(sides.x != 0u && sides.x != 0xffu) { found = sides.x; }
-                else if(sides.y != 0u && sides.y != 0xffu) { found = sides.y; }
-                else if(sides.z != 0u && sides.z != 0xffu) { found = sides.z; }
-                else if(sides.w != 0u && sides.w != 0xffu) { found = sides.w; }
-
-                if(found != 0u)
-                {
-                    renderScratch[pixelId] = found;
-                }
+                pixelId = (pixelId << 8) | sectorId;
             }
-
-            barrier();
         }
-    }
 
-    // Write out to the final image
-    for(uint it = tid; it < (MAX_LEVEL_DIM_SHARED_SIZE * MAX_LEVEL_DIM_SHARED_SIZE); it += NUM_THREADS)
-    {
-        uvec2 localCoord = uvec2(it % MAX_LEVEL_DIM_SHARED_SIZE, it / MAX_LEVEL_DIM_SHARED_SIZE)
-                         + uvec2(MAX_LEVEL_DIM_SHARED_OFFSET);
-        if(localCoord.x < atlasInfo.size.x && localCoord.y < atlasInfo.size.y)
-        {
-            imageStore(mapAtlas,
+        imageStore(mapAtlas,
                        ivec2(atlasInfo.offset + localCoord),
-                       uvec4(renderScratch[it]));
-        }
+                       uvec4(pixelId));
     }
 }
 

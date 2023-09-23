@@ -30,9 +30,22 @@ ivec2 decodePathDirection(uint idx)
 }
 
 
+ivec2 calcDirectionCoordForRoom(ivec2 globalCoord,
+                                uint roomId)
+{
+    globalCoord.x *= 2;
+    if(roomId >= 33)
+    {
+        globalCoord.x += 1;
+    }
+    return globalCoord;
+}
+
 uint extractDirectionToRoom(uvec2 mask,
                             uint roomId)
 {
+    --roomId;
+    roomId &= 31u;
     if(roomId >= 16u)
     {
         mask.x = mask.y;
@@ -47,8 +60,9 @@ uint extractDirectionToRoom(uvec2 mask,
 #define getDirectionToRoom(/* uimage2D */ roomDirectionsImage,\
                            /* ivec2 */ globalCoord,\
                            /* uint */ roomId)\
-        extractDirectionToRoom(imageLoad(roomDirectionsImage, globalCoord).xy,\
-                               roomId)
+        extractDirectionToRoom(imageLoad(roomDirectionsImage,\
+                                         calcDirectionCoordForRoom((globalCoord), (roomId))).xy,\
+                               (roomId))
 
 
 #endif // PATHFINDING_COMMON_GLSLI

@@ -158,17 +158,6 @@ class Renderer(object):
         glNamedBufferStorage(self._generated_lines, 4 * 1024, None, 0)
 
 
-        self._map_atlas_tiles = viewport.FramebufferTarget(GL_R8UI, True)
-        self._map_atlas_depth = viewport.FramebufferTarget(GL_DEPTH_COMPONENT32F, True)
-        self._map_atlas_fb = viewport.Framebuffer(
-            (
-                self._map_atlas_tiles,
-                self._map_atlas_depth,
-            ),
-            LEVEL_TILES_X,
-            LEVEL_TILES_Y,
-        )
-
         global_parameters2 = numpy.array(
             [
                 0,          # cpuTime
@@ -194,6 +183,31 @@ class Renderer(object):
         self._global_parameters2 = self._buffers2_ptr[0]
         glNamedBufferStorage(self._global_parameters2, len(global_parameters2), global_parameters2, 0)
 
+        self._map_atlas_ptr = ctypes.c_int()
+        glCreateTextures(GL_TEXTURE_2D, 1, self._map_atlas_ptr)
+        self._map_atlas = self._map_atlas_ptr.value
+
+        glTextureParameteri(self._map_atlas, GL_TEXTURE_WRAP_S, GL_REPEAT)
+        glTextureParameteri(self._map_atlas, GL_TEXTURE_WRAP_T, GL_REPEAT)
+        glTextureParameteri(self._map_atlas, GL_TEXTURE_MIN_FILTER, GL_NEAREST)
+        glTextureParameteri(self._map_atlas, GL_TEXTURE_MAG_FILTER, GL_NEAREST)
+        glTextureStorage2D(
+            self._map_atlas,
+            1,
+            GL_R32UI,
+            LEVEL_TILES_X,
+            LEVEL_TILES_Y
+        )
+        
+        glClearTexImage(
+            self._map_atlas,
+            0,
+            GL_RG_INTEGER ,
+            GL_UNSIGNED_INT,
+            numpy.array([0, 0], dtype=numpy.uint32).tobytes()
+        )
+
+
         self._pathfinding_directions_ptr = ctypes.c_int()
         glCreateTextures(GL_TEXTURE_2D, 1, self._pathfinding_directions_ptr)
         self._pathfinding_directions = self._pathfinding_directions_ptr.value
@@ -206,7 +220,7 @@ class Renderer(object):
             self._pathfinding_directions,
             1,
             GL_RG32UI,
-            LEVEL_TILES_X,
+            LEVEL_TILES_X * 2,
             LEVEL_TILES_Y
         )
         
@@ -226,35 +240,35 @@ class Renderer(object):
 
         glUseProgram(_GEN_MAP_ATLAS_PROGRAM.one())
         glBindBufferBase(GL_UNIFORM_BUFFER, 0, self._global_parameters2)
-        glBindImageTexture(1, self._map_atlas_tiles.texture, 0, False, 0, GL_WRITE_ONLY, GL_R8UI)
+        glBindImageTexture(1, self._map_atlas, 0, False, 0, GL_WRITE_ONLY, GL_R32UI)
         glDispatchCompute(1, 1, 8)
-        glMemoryBarrier(GL_SHADER_STORAGE_BARRIER_BIT | GL_SHADER_IMAGE_ACCESS_BARRIER_BIT)
+        glMemoryBarrier(GL_SHADER_IMAGE_ACCESS_BARRIER_BIT)
 
         glUseProgram(_GEN_PATHFINDING_DIRECTIONS_PROGRAM.one())
         glBindBufferBase(GL_UNIFORM_BUFFER, 0, self._global_parameters2)
-        glBindImageTexture(1, self._map_atlas_tiles.texture, 0, False, 0, GL_READ_ONLY, GL_R8UI)
+        glBindImageTexture(1, self._map_atlas, 0, False, 0, GL_READ_ONLY, GL_R32UI)
         glBindImageTexture(2, self._pathfinding_directions, 0, False, 0, GL_READ_WRITE, GL_RG32UI)
-        glDispatchCompute(1, 1, 8)
-        glMemoryBarrier(GL_SHADER_STORAGE_BARRIER_BIT | GL_SHADER_IMAGE_ACCESS_BARRIER_BIT)
+        glDispatchCompute(1, 1, 8 * 2)
+        glMemoryBarrier(GL_SHADER_IMAGE_ACCESS_BARRIER_BIT)
 
         glUseProgram(_DRAW_BSP_MAP_DEBUG_PROGRAM.get(VS_OUTPUT_UV=0))
-        glBindTextureUnit(0, self._map_atlas_tiles.texture)
+        glBindTextureUnit(0, self._map_atlas)
         # glBindTextureUnit(0, self._pathfinding_directions)
         glBindVertexArray(viewport.get_dummy_vao())
         glDrawArrays(GL_TRIANGLES, 0, 3)
 
         glUseProgram(_DEBUG_VIS_PATHFINDING_DIRECTIONS_PROGRAM.one())
         glBindBufferBase(GL_UNIFORM_BUFFER, 0, self._global_parameters2)
-        glBindImageTexture(1, self._map_atlas_tiles.texture, 0, False, 0, GL_READ_ONLY, GL_R8UI)
+        glBindImageTexture(1, self._map_atlas, 0, False, 0, GL_READ_ONLY, GL_R32UI)
         glBindImageTexture(2, self._pathfinding_directions, 0, False, 0, GL_READ_ONLY, GL_RG32UI)
-        glUniform2ui(0, self._vis_pf_level, self._vis_pf_room)
+        glUniform2ui(0, self._vis_pf_level, self._vis_pf_room + 1)
         glDrawArrays(GL_TRIANGLES, 0, 64 * 64 * 6)
 
         if False:
             glMemoryBarrier(GL_SHADER_IMAGE_ACCESS_BARRIER_BIT)
             glUseProgram(_GENERATE_MAP_LINES_PROGRAM.one())
             glBindBufferBase(GL_UNIFORM_BUFFER, 0, self._global_parameters)
-            glBindImageTexture(1, self._map_atlas_tiles.texture, 0, False, 0, GL_READ_ONLY, GL_R8UI)
+            glBindImageTexture(1, self._map_atlas, 0, False, 0, GL_READ_ONLY, GL_R32UI)
             glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 2, self._draw_allocator)
             glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 3, self._generated_lines)
             glDispatchCompute(1, 1, 1)
@@ -302,7 +316,7 @@ class Renderer(object):
             print("Level =", self._vis_pf_level)
 
         elif key == b'o':
-            self._vis_pf_room = (self._vis_pf_room + 1) & 31
+            self._vis_pf_room = (self._vis_pf_room + 1) & 63
             print("Room =", self._vis_pf_room)
         # ctrl+o
         elif key == b'\x0f':

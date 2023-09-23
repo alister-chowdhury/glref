@@ -8,7 +8,7 @@
 #include "../pathfinding_common.glsli"
 
 
-readonly layout(binding=1, r8ui)    uniform uimage2D mapAtlas;
+readonly layout(binding=1, r32ui)    uniform uimage2D mapAtlas;
 readonly layout(binding=2, rg32ui)   uniform uimage2D roomDirections;
 
 layout(location=0) uniform uvec2 targetLevelAndRoom;
@@ -32,8 +32,8 @@ void main()
         float levelToScreenScale = 64.0 / float(max(atlasInfo.size.x, atlasInfo.size.y));
         ivec2 coord = levelCoord + ivec2(atlasInfo.offset);
 
-        uint roomPixel = imageLoad(mapAtlas, coord).x;
-        if(roomPixel != 0u)
+        uint roomPixelMask = imageLoad(mapAtlas, coord).x;
+        if(roomPixelMask != 0u)
         {
             uint direction = getDirectionToRoom(roomDirections, coord, targetRoomId);
             int vertexId = triangleToQuadVertexIdZ(gl_VertexID % 6);
@@ -44,7 +44,7 @@ void main()
             shapeNdc = vec2(dot(X, shapeNdc),
                             dot(vec2(X.y, -X.x), shapeNdc));
 
-            if((roomPixel - 1u) == targetRoomId)
+            if(containsSingleSector(roomPixelMask, targetRoomId))
             {
                 shapeNdc = vec2(10.0);
             }
