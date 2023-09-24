@@ -1,17 +1,6 @@
 #version 460 core
 
 
-
-/*
-
-    So something seems wrong with seed=0, level=7, room=2
-    It looks like a barrier issue, due to part of the room looking like
-    it was not written completely.
-
-    Happens on INTEL, doesn't seem to happen on NVIDIA.
-    Generates correctly when captures with renderdoc.
-*/
-
 #define NUM_THREADS     64
 #define MAX_PATHS       (MAX_ROOMS - 1)
 
@@ -235,11 +224,6 @@ void renderBsp(uint tid, MapAtlasLevelInfo atlasInfo)
         ivec2 localCoord = ivec2(uvec2(it % MAX_LEVEL_DIM_SHARED_SIZE, it / MAX_LEVEL_DIM_SHARED_SIZE))
                             + ivec2(MAX_LEVEL_DIM_SHARED_OFFSET);
 
-        if(!(localCoord.x < atlasInfo.size.x && localCoord.y < atlasInfo.size.y))
-        {
-            continue;
-        }
-
         uint nextSectorId = 0u;
         uint pixelId = 0u;
 
@@ -252,22 +236,6 @@ void renderBsp(uint tid, MapAtlasLevelInfo atlasInfo)
             // Already found the room under this pixel, at this point
             // we're just counting the number of valid rooms
             if(pixelId != 0u) { continue; }
-
-            // Ok for reasons I dont know, if I remove this, it seems to draw
-            // this incorrectly, probably some missing barrier?
-            // (Only happening on intel???)
-
-            // uint lastsectorId = 2u;
-            // if(sectorId == 1) { sectorId = lastsectorId; }
-            // else if(sectorId == lastsectorId) { sectorId = 1u; }
-            
-            // Ensure the enter/exit room are reasonably far away.
-            //
-            // Does a reasonably good job of seperating the start
-            // and end rooms.
-            uint lastsectorId = 4u;
-            if(sectorId == EXIT_ROOM_ID) { sectorId = lastsectorId; }
-            else if(sectorId == lastsectorId) { sectorId = EXIT_ROOM_ID; }
 
             if(localCoord.x >= nodeSpan.x && localCoord.x < nodeSpan.z
                 && localCoord.y >= nodeSpan.y && localCoord.y < nodeSpan.w)
@@ -290,9 +258,12 @@ void renderBsp(uint tid, MapAtlasLevelInfo atlasInfo)
             }
         }
 
-        imageStore(mapAtlas,
-                       ivec2(atlasInfo.offset + localCoord),
-                       uvec4(pixelId));
+        if((localCoord.x < atlasInfo.size.x && localCoord.y < atlasInfo.size.y))
+        {
+            imageStore(mapAtlas,
+                           ivec2(atlasInfo.offset + localCoord),
+                           uvec4(pixelId));
+        }
     }
 }
 

@@ -24,8 +24,11 @@
 #define MAX_LEVEL_DIM_SHARED_SIZE   62
 #define MAX_LEVEL_DIM_SHARED_OFFSET 1
 
+
+// Ids do a reasonably good job of seperating
+// the start / and end rooms.
 #define ENTER_ROOM_ID       1
-#define EXIT_ROOM_ID        2
+#define EXIT_ROOM_ID        4
 
 
 struct MapAtlasLevelInfo
