@@ -1,0 +1,93 @@
+#version 460 core
+
+#include "../common.glsli"
+#include "../map_atlas_common.glsli"
+#include "../pathfinding_common.glsli"
+
+layout(local_size_x=MAX_ROOMS) in;
+
+
+layout(set=0, binding = 0) uniform GlobalParameters_
+{
+    GlobalParameters globals;
+}; 
+
+
+readonly layout(binding=1, r32ui)    uniform uimage2D mapAtlas;
+readonly layout(binding=2, rg32ui)   uniform uimage2D roomDirections;
+layout(std430, binding = 3) buffer mapAtlasData_ { uint mapAtlasData[]; };
+
+
+shared uint  pickRoomsNumSteps[MAX_ROOMS];
+
+uint findFurthestRoom(uint tid, uint numRooms, ivec4 entryStart, MapAtlasLevelInfo atlasInfo)
+{
+    uint numSteps = 0u;
+    if(tid < numRooms)
+    {
+        uint roomId = tid + 1u;
+        ivec2 currentCoord = (entryStart.xy + entryStart.zw) / 2 + ivec2(atlasInfo.offset);
+
+        while(!containsSingleSector(imageLoad(mapAtlas, currentCoord).x, roomId))
+        {
+            ++numSteps;
+            uint direction = getDirectionToRoom(roomDirections, currentCoord, roomId);
+            currentCoord += decodePathDirection(direction);
+
+            if(numSteps > 0xffff) { break; }
+        }
+    }
+
+    pickRoomsNumSteps[tid] = numSteps;
+    barrier();
+
+    uint best = pickRoomsNumSteps[0];
+    uint idx = 0;
+    for(uint i=1; i<MAX_ROOMS; ++i)
+    {
+        if(pickRoomsNumSteps[i] > best)
+        {
+            best = pickRoomsNumSteps[i];
+            idx = i;
+        }
+    }
+
+    return idx;
+}
+
+
+void pickStartEndRooms(uint tid, uint levelId, MapAtlasLevelInfo atlasInfo)
+{
+
+    // Approximatly find whichever two rooms are furthest away from each other
+
+    uint levelDataOffset = levelId * MAP_ATLAS_LEVEL_DATA_STRIDE;
+    uint numRooms = mapAtlasData[levelDataOffset + MAP_ATLAS_LEVEL_DATA_NUM_ROOMS_OFFSET];
+
+    uint idx0 = 0u;
+    uint idx1 = 0u;
+
+    for(int i=0; i<4; ++i)
+    {
+        idx1 = idx0;
+        ivec4 entryStart = unpackSpan(mapAtlasData[levelDataOffset + MAP_ATLAS_LEVEL_DATA_ROOM_SPANS_OFFSET + idx1]);
+        idx0 = findFurthestRoom(tid, numRooms, entryStart, atlasInfo);
+    }
+
+    if(tid == 0)
+    {
+        mapAtlasData[levelDataOffset + MAP_ATLAS_LEVEL_DATA_START_ROOM_OFFSET] = idx0 + 1;
+        mapAtlasData[levelDataOffset + MAP_ATLAS_LEVEL_DATA_END_ROOM_OFFSET] = idx1 + 1;
+    }
+    barrier();
+}
+
+
+void main()
+{
+    uint tid = gl_LocalInvocationID.x;
+    uint levelId = gl_GlobalInvocationID.z;
+    MapAtlasLevelInfo atlasInfo = getLevelAtlasInfo(levelId);
+    pickStartEndRooms(tid, levelId, atlasInfo);
+
+}

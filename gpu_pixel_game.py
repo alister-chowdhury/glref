@@ -18,34 +18,10 @@ _DRAW_FULL_SCREEN_PATH = os.path.join(
     _SHADER_DIR, "draw_full_screen.vert"
 )
 
-
-_DRAW_LINES_DEBUG_PROGRAM = viewport.make_permutation_program(
-    _DEBUGGING,
-    GL_VERTEX_SHADER = gpu_pixel_game_lib.DRAW_LINES_DEBUG_VERT,
-    GL_FRAGMENT_SHADER = gpu_pixel_game_lib.DRAW_LINES_DEBUG_FRAG
-)
-
 _DRAW_BSP_MAP_DEBUG_PROGRAM = viewport.make_permutation_program(
     _DEBUGGING,
     GL_VERTEX_SHADER = _DRAW_FULL_SCREEN_PATH,
     GL_FRAGMENT_SHADER = gpu_pixel_game_lib.DRAW_BSP_MAP_DEBUG_FRAG
-)
-
-
-_GENERATE_MAP_LINES_PROGRAM = viewport.make_permutation_program(
-    _DEBUGGING,
-    GL_COMPUTE_SHADER = gpu_pixel_game_lib.GENERATE_MAP_LINES_COMP
-)
-
-_GENERATE_MAP_BVH_V2_PROGRAM = viewport.make_permutation_program(
-    _DEBUGGING,
-    GL_COMPUTE_SHADER = gpu_pixel_game_lib.GENERATE_MAP_BVH_V2_COMP
-)
-
-_DRAW_BVH_DEBUG_PROGRAM = viewport.make_permutation_program(
-    _DEBUGGING,
-    GL_VERTEX_SHADER = gpu_pixel_game_lib.DRAW_BVH_DEBUG_VERT,
-    GL_FRAGMENT_SHADER = gpu_pixel_game_lib.DRAW_BVH_DEBUG_FRAG
 )
 
 _GEN_MAP_ATLAS_PROGRAM = viewport.make_permutation_program(
@@ -56,6 +32,11 @@ _GEN_MAP_ATLAS_PROGRAM = viewport.make_permutation_program(
 _GEN_PATHFINDING_DIRECTIONS_PROGRAM = viewport.make_permutation_program(
     _DEBUGGING,
     GL_COMPUTE_SHADER = gpu_pixel_game_lib.GEN_PATHFINDING_DIRECTIONS_COMP
+)
+
+FINISH_MAP_GEN_PROGRAM = viewport.make_permutation_program(
+    _DEBUGGING,
+    GL_COMPUTE_SHADER = gpu_pixel_game_lib.FINISH_MAP_GEN_COMP
 )
 
 _DEBUG_VIS_PATHFINDING_DIRECTIONS_PROGRAM = viewport.make_permutation_program(
@@ -91,73 +72,7 @@ class Renderer(object):
     def _init(self, wnd):
         glClearColor(0.0, 0.0, 0.0, 0.0)
 
-        # todo record indirection commands etc for indirect drawcalls
-        self._buffers_ptr = (ctypes.c_int * 10)()
-        glCreateBuffers(10, self._buffers_ptr)
-
-
-        self._global_parameters = self._buffers_ptr[0]
-        self._draw_allocator = self._buffers_ptr[1]
-        self._draw_commands = self._buffers_ptr[2]
-        self._lines_buffer = self._buffers_ptr[3]
-        self._gen_bvh_params_buffer = self._buffers_ptr[4]
-        self._bvh_buffer = self._buffers_ptr[5]
-        self._generated_lines = self._buffers_ptr[6]
-
-
         global_parameters = numpy.array(
-            [
-                0x12345678, # randomSeed
-                0xf01231f0, # levelSeed
-                # Padding
-                0, 0
-            ],
-            dtype=numpy.uint32
-        ).tobytes()
-
-        draw_indirect = numpy.array(
-            [
-                0, # vertexCount
-                1, # instanceCount
-                0, # firstVertex
-                0, # firstInstance
-            ],
-            dtype=numpy.uint32
-        ).tobytes()
-
-        lines = (numpy.array(
-            [
-                0.1, 0.1, 0.5, 0.5,
-                0.2, 0.2, 0.6, 0.6,
-                0.5, 0.1, 0.5, 0.5,
-                0.6, 0.2, 0.6, 0.6,
-                0.5, 0.1, 0.5, 0.5,
-                0.6, 0.2, 0.6, 0.6,
-            ],
-            dtype=numpy.float32
-            )
-         ).tobytes()
-
-        gen_bvh_params = numpy.array(
-            [
-                len(lines) // (4 * 4), # numLines
-                0, # padding
-                0, # padding
-                0, # padding
-            ],
-            dtype=numpy.uint32
-        ).tobytes()
-
-        glNamedBufferStorage(self._global_parameters, len(global_parameters), global_parameters, 0)
-        glNamedBufferStorage(self._draw_allocator, len(draw_indirect), draw_indirect, 0)
-        glNamedBufferStorage(self._draw_commands, 4 * 2 * LEVEL_TILES_X * LEVEL_TILES_Y, None, 0)
-        glNamedBufferStorage(self._lines_buffer, len(lines), lines, 0)
-        glNamedBufferStorage(self._gen_bvh_params_buffer, len(gen_bvh_params), gen_bvh_params, 0)
-        glNamedBufferStorage(self._bvh_buffer, 4 * 4 * 3 * 189 + 1024 * 4, None, 0)
-        glNamedBufferStorage(self._generated_lines, 4 * 1024, None, 0)
-
-
-        global_parameters2 = numpy.array(
             [
                 0,          # cpuTime
                 0,          # cpuAnimFrame
@@ -177,10 +92,14 @@ class Renderer(object):
             dtype=numpy.uint32
         ).tobytes()
 
-        self._buffers2_ptr = (ctypes.c_int * 10)()
-        glCreateBuffers(10, self._buffers2_ptr)
-        self._global_parameters2 = self._buffers2_ptr[0]
-        glNamedBufferStorage(self._global_parameters2, len(global_parameters2), global_parameters2, 0)
+        self._buffers_ptr = (ctypes.c_int * 10)()
+        glCreateBuffers(10, self._buffers_ptr)
+        self._global_parameters = self._buffers_ptr[0]
+        glNamedBufferStorage(self._global_parameters, len(global_parameters), global_parameters, 0)
+        
+        self._map_atlas_level_data = self._buffers_ptr[1]
+        glNamedBufferStorage(self._map_atlas_level_data, (4 * 8 * (32 + 3)), None, 0)
+
 
         self._map_atlas_ptr = ctypes.c_int()
         glCreateTextures(GL_TEXTURE_2D, 1, self._map_atlas_ptr)
@@ -238,17 +157,26 @@ class Renderer(object):
         glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT)
 
         glUseProgram(_GEN_MAP_ATLAS_PROGRAM.one())
-        glBindBufferBase(GL_UNIFORM_BUFFER, 0, self._global_parameters2)
+        glBindBufferBase(GL_UNIFORM_BUFFER, 0, self._global_parameters)
         glBindImageTexture(1, self._map_atlas, 0, False, 0, GL_WRITE_ONLY, GL_R32UI)
+        glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 2, self._map_atlas_level_data)
         glDispatchCompute(1, 1, 8)
         glMemoryBarrier(GL_SHADER_IMAGE_ACCESS_BARRIER_BIT)
 
         glUseProgram(_GEN_PATHFINDING_DIRECTIONS_PROGRAM.one())
-        glBindBufferBase(GL_UNIFORM_BUFFER, 0, self._global_parameters2)
+        glBindBufferBase(GL_UNIFORM_BUFFER, 0, self._global_parameters)
         glBindImageTexture(1, self._map_atlas, 0, False, 0, GL_READ_ONLY, GL_R32UI)
         glBindImageTexture(2, self._pathfinding_directions, 0, False, 0, GL_READ_WRITE, GL_RG32UI)
         glDispatchCompute(1, 1, 8 * 2)
-        glMemoryBarrier(GL_SHADER_IMAGE_ACCESS_BARRIER_BIT)
+        glMemoryBarrier(GL_SHADER_IMAGE_ACCESS_BARRIER_BIT | GL_SHADER_STORAGE_BARRIER_BIT)
+
+        glUseProgram(FINISH_MAP_GEN_PROGRAM.one())
+        glBindBufferBase(GL_UNIFORM_BUFFER, 0, self._global_parameters)
+        glBindImageTexture(1, self._map_atlas, 0, False, 0, GL_READ_ONLY, GL_R32UI)
+        glBindImageTexture(2, self._pathfinding_directions, 0, False, 0, GL_READ_ONLY, GL_RG32UI)
+        glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 3, self._map_atlas_level_data)
+        glDispatchCompute(1, 1, 8)
+        glMemoryBarrier(GL_SHADER_STORAGE_BARRIER_BIT)
 
         glUseProgram(_DRAW_BSP_MAP_DEBUG_PROGRAM.get(VS_OUTPUT_UV=0))
         glBindTextureUnit(0, self._map_atlas)
@@ -257,42 +185,11 @@ class Renderer(object):
         glDrawArrays(GL_TRIANGLES, 0, 3)
 
         glUseProgram(_DEBUG_VIS_PATHFINDING_DIRECTIONS_PROGRAM.one())
-        glBindBufferBase(GL_UNIFORM_BUFFER, 0, self._global_parameters2)
+        glBindBufferBase(GL_UNIFORM_BUFFER, 0, self._global_parameters)
         glBindImageTexture(1, self._map_atlas, 0, False, 0, GL_READ_ONLY, GL_R32UI)
         glBindImageTexture(2, self._pathfinding_directions, 0, False, 0, GL_READ_ONLY, GL_RG32UI)
         glUniform2ui(0, self._vis_pf_level, self._vis_pf_room + 1)
         glDrawArrays(GL_TRIANGLES, 0, 64 * 64 * 6)
-
-        if False:
-            glMemoryBarrier(GL_SHADER_IMAGE_ACCESS_BARRIER_BIT)
-            glUseProgram(_GENERATE_MAP_LINES_PROGRAM.one())
-            glBindBufferBase(GL_UNIFORM_BUFFER, 0, self._global_parameters)
-            glBindImageTexture(1, self._map_atlas, 0, False, 0, GL_READ_ONLY, GL_R32UI)
-            glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 2, self._draw_allocator)
-            glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 3, self._generated_lines)
-            glDispatchCompute(1, 1, 1)
-
-            glMemoryBarrier(GL_SHADER_STORAGE_BARRIER_BIT)
-            glUseProgram(_DRAW_LINES_DEBUG_PROGRAM.one())
-            glBindBufferBase(GL_UNIFORM_BUFFER, 0, self._global_parameters)
-            glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 1, self._generated_lines)
-            glBindVertexArray(viewport.get_dummy_vao())
-            glBindBuffer(GL_DRAW_INDIRECT_BUFFER, self._draw_allocator)
-            glDrawArraysIndirect(GL_LINES, ctypes.c_void_p(0))
-
-            glUseProgram(_GENERATE_MAP_BVH_V2_PROGRAM.one())
-            glBindBufferBase(GL_UNIFORM_BUFFER, 0, self._global_parameters)
-            glBindBufferBase(GL_UNIFORM_BUFFER, 1, self._gen_bvh_params_buffer)
-            glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 2, self._lines_buffer)
-            glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 3, self._bvh_buffer)
-            glDispatchCompute(1, 1, 1)
-
-            # Super broken, we need to start again from scratch really..
-            glMemoryBarrier(GL_SHADER_STORAGE_BARRIER_BIT)
-            glUseProgram(_DRAW_BVH_DEBUG_PROGRAM.one())
-            glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 0, self._bvh_buffer)
-            glBindVertexArray(viewport.get_dummy_vao())
-            glDrawArrays(GL_LINES, 0, 16 * 63)
 
         wnd.redraw()
 
@@ -316,32 +213,17 @@ class Renderer(object):
 
         elif key == b'o':
             self._vis_pf_room = (self._vis_pf_room + 1) & 63
-            print("Room =", self._vis_pf_room)
+            print("Room =", self._vis_pf_room + 1)
         # ctrl+o
         elif key == b'\x0f':
             self._vis_pf_room = 0
-            print("Room =", self._vis_pf_room)
+            print("Room =", self._vis_pf_room + 1)
 
         elif key == b'c':
             glDeleteBuffers(1, self._buffers_ptr)
             glCreateBuffers(1, self._buffers_ptr)
             self._global_parameters = self._buffers_ptr[0]
-
             global_parameters = numpy.array(
-                [
-                    self._n, # randomSeed
-                    0xf01231f0, # levelSeed
-                    # Padding
-                    0, 0
-                ],
-                dtype=numpy.uint32
-            ).tobytes()
-            glNamedBufferStorage(self._global_parameters, len(global_parameters), global_parameters, 0)
-
-            glDeleteBuffers(1, self._buffers2_ptr)
-            glCreateBuffers(1, self._buffers2_ptr)
-            self._global_parameters2 = self._buffers2_ptr[0]
-            global_parameters2 = numpy.array(
                 [
                     0,          # cpuTime
                     0,          # cpuAnimFrame
@@ -360,8 +242,7 @@ class Renderer(object):
                 ],
                 dtype=numpy.uint32
             ).tobytes()
-
-            glNamedBufferStorage(self._global_parameters2, len(global_parameters2), global_parameters2, 0)
+            glNamedBufferStorage(self._global_parameters, len(global_parameters), global_parameters, 0)
 
             self._n += 1
 

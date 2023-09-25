@@ -1,21 +1,9 @@
 #ifndef MAP_ATLAS_COMMON_GLSLI
 #define MAP_ATLAS_COMMON_GLSLI
 
-
-#define MAP_ATLAS_WALL_ID_NONE  0
-#define MAP_ATLAS_WALL_ID_WALL  1
-#define MAP_ATLAS_WALL_ID_FLOOR 2
-
-
-#define MAP_ATLAS_WALL_DEPTH_NONE   0x0fff
-#define MAP_ATLAS_WALL_DEPTH_WALL   0x0ff0
-#define MAP_ATLAS_WALL_DEPTH_FLOOR  0x0fe0
-
 #define MAX_ROOMS           32
-
 #define FINAL_ATLAS_WIDTH   128
 #define FINAL_ATLAS_HEIGHT  128
-
 #define MAX_LEVEL_DIM       64
 
 // There is always a 1px pading around the border
@@ -25,10 +13,20 @@
 #define MAX_LEVEL_DIM_SHARED_OFFSET 1
 
 
-// Ids do a reasonably good job of seperating
-// the start / and end rooms.
-#define ENTER_ROOM_ID       1
-#define EXIT_ROOM_ID        4
+#define packed_span_t   uint
+
+
+ivec4 unpackSpan(packed_span_t x)
+{
+    return ivec4((uvec4(x) >> ivec4(0, 8, 16, 24)) & 0xffu);
+}
+
+
+packed_span_t packSpan(ivec4 x)
+{
+    uvec4 y = uvec4(x) << ivec4(0, 8, 16, 24);
+    return y.x | y.y | y.z | y.w;
+}
 
 
 struct MapAtlasLevelInfo
@@ -89,12 +87,28 @@ MapAtlasLevelInfo getLevelAtlasInfo(uint level)
                                              uvec2(52, 52),
                                              4u,
                                              20u);
+        default:
         case 7: return makeMapAtlasLevelInfo(uvec2(0, 0),
                                              uvec2(64, 64),
                                              5u,
                                              24u);
     }
 }
+
+
+#define MAP_ATLAS_LEVEL_DATA_NUM_ROOMS_OFFSET   0
+#define MAP_ATLAS_LEVEL_DATA_START_ROOM_OFFSET  1
+#define MAP_ATLAS_LEVEL_DATA_END_ROOM_OFFSET    2
+#define MAP_ATLAS_LEVEL_DATA_ROOM_SPANS_OFFSET  3
+#define MAP_ATLAS_LEVEL_DATA_STRIDE             (MAX_ROOMS + 3)
+
+struct MapAtlasLevelData
+{
+    uint    numRooms;
+    uint    startRoom;
+    uint    endRoom;
+    uint    packedRoomSpans[MAX_ROOMS];
+};
 
 
 // We store a maximum of 4 sectors per pixel, each
@@ -107,6 +121,7 @@ uvec4 unpackSectorIds(uint atlasMask)
                  (atlasMask >> 16) & 0xffu,
                   atlasMask >> 24);
 }
+
 
 bool containsSingleSector(uint atlasMask,
                           uint sectorId)

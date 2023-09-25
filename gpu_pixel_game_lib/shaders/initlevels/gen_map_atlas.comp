@@ -19,6 +19,7 @@ layout(set=0, binding = 0) uniform GlobalParameters_
 
 
 writeonly layout(binding=1, r32ui) uniform uimage2D mapAtlas;
+writeonly layout(std430, binding = 2) buffer mapAtlasData_ { uint mapAtlasData[]; };
 
 
 // Uses the last 23bits to construct a linear range
@@ -89,22 +90,8 @@ uint bspSplit(const DrawQueue parent,
 }
 
 
-// We know the final texture size is never greater than
-// 128x128, as such we can save a bit of SMEM by packing
-// spans into a sing uint.
-#define packed_span_t   uint
 #define packed_bsp_t    uint
 
-ivec4 unpackSpan(packed_span_t x)
-{
-    return ivec4((uvec4(x) >> ivec4(0, 8, 16, 24)) & 0xffu);
-}
-
-packed_span_t packSpan(ivec4 x)
-{
-    uvec4 y = uvec4(x) << ivec4(0, 8, 16, 24);
-    return y.x | y.y | y.z | y.w;
-}
 
 DrawQueue unpackBspNode(packed_bsp_t x)
 {
@@ -215,7 +202,6 @@ void generateBsp(uint tid, MapAtlasLevelInfo atlasInfo)
     }
 }
 
-
 void renderBsp(uint tid, MapAtlasLevelInfo atlasInfo)
 {
     // Render paths + levels
@@ -268,10 +254,46 @@ void renderBsp(uint tid, MapAtlasLevelInfo atlasInfo)
 }
 
 
+void generateMapAtlasData(uint tid, uint levelId)
+{
+    uint numRooms = 0;
+    uint evaluateRoomId = 0xffffffffu;
+    uint roomPackedSpan = 0xffffffffu;
+
+    for(uint i=0; i<MAX_ROOMS; ++i)
+    {
+        ivec4 nodeSpan = unpackBspNode(bspQueue[i]).span;
+        if(nodeSpan.x == nodeSpan.z) { continue; }
+
+        if(i == tid)
+        {
+            evaluateRoomId = numRooms;
+            roomPackedSpan = packSpan(nodeSpan);
+        }
+        ++numRooms;
+    }
+
+    uint levelDataOffset = levelId * MAP_ATLAS_LEVEL_DATA_STRIDE;
+
+    if(tid == 0u)
+    {
+        mapAtlasData[levelDataOffset + MAP_ATLAS_LEVEL_DATA_NUM_ROOMS_OFFSET] = numRooms;
+        mapAtlasData[levelDataOffset + MAP_ATLAS_LEVEL_DATA_START_ROOM_OFFSET] = 0u;
+        mapAtlasData[levelDataOffset + MAP_ATLAS_LEVEL_DATA_END_ROOM_OFFSET] = 0u;
+    }
+
+    if(evaluateRoomId != 0xffffffffu)
+    {
+        mapAtlasData[levelDataOffset + MAP_ATLAS_LEVEL_DATA_ROOM_SPANS_OFFSET + evaluateRoomId] = roomPackedSpan;
+    }
+}
+
+
 void main()
 {
     uint tid = gl_LocalInvocationID.x;
     MapAtlasLevelInfo atlasInfo = getLevelAtlasInfo(gl_GlobalInvocationID.z);
     generateBsp(tid, atlasInfo);
     renderBsp(tid, atlasInfo);
+    generateMapAtlasData(tid, gl_GlobalInvocationID.z);
 }
