@@ -10,7 +10,6 @@ import gpu_pixel_game_lib
 
 _DEBUGGING = False
 
-
 _SHADER_DIR = os.path.abspath(
     os.path.join(__file__, "..", "shaders")
 )

@@ -5,6 +5,9 @@ from OpenGL.GL.NV.mesh_shader import (
 )
 
 
+GL_SHADER_BINARY_FORMAT_SPIR_V_ARB = 0x9551
+
+
 _SHADER_NICE_NAME = {
     GL_COMPUTE_SHADER: "GL_COMPUTE_SHADER",
     GL_VERTEX_SHADER: "GL_VERTEX_SHADER",
@@ -22,10 +25,20 @@ _INVERSE_SHADER_NAME = {
 }
 
 
-def build_shader(source, shader_type=GL_VERTEX_SHADER):
+def build_shader(source, shader_type=GL_VERTEX_SHADER, spirv=False):
     shader_id = glCreateShader(shader_type)
-    glShaderSource(shader_id, source, 0)
-    glCompileShader(shader_id)
+    if spirv:
+        glShaderBinary(
+            1,
+            shader_id,
+            GL_SHADER_BINARY_FORMAT_SPIR_V_ARB,
+            source,
+            len(source)
+        )
+        glSpecializeShader(shader_id, b"main", 0, None, None)
+    else:
+        glShaderSource(shader_id, source, 0)
+        glCompileShader(shader_id)
     ok = glGetShaderiv(shader_id, GL_COMPILE_STATUS)
     if not ok:
         error_log = glGetShaderInfoLog(shader_id)
@@ -54,7 +67,7 @@ def generate_shader_program_from_files(**shader_type_source):
     return generate_shader_program(**data)
 
 
-def generate_shader_program(**shader_type_source):
+def generate_shader_program(spirv=False, **shader_type_source):
     """Generate a shader_program.
 
     Usage:
@@ -64,7 +77,7 @@ def generate_shader_program(**shader_type_source):
         )
     """
     shader_ids = [
-        build_shader(source, _INVERSE_SHADER_NAME[shader_type_name])
+        build_shader(source, _INVERSE_SHADER_NAME[shader_type_name], spirv=spirv)
         for shader_type_name, source in shader_type_source.items()
     ]
 
@@ -77,7 +90,9 @@ def generate_shader_program(**shader_type_source):
     ok = glGetProgramiv(main_program, GL_LINK_STATUS)
     if not ok:
         error_log = glGetProgramInfoLog(main_program)
-        raise RuntimeError("Failed to link program:\n{0}".format(error_log.decode("latin-1")))
+        if not isinstance(error_log, str):
+            error_log = error_log.decode("latin-1")
+        raise RuntimeError("Failed to link program:\n{0}".format(error_log))
 
     for shader_id in shader_ids:
         glDetachShader(main_program, shader_id)

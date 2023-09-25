@@ -306,6 +306,12 @@ void directionFloorItChecker(uint tid,
         uvec2 third = uvec2(up, PATHFINDING_UP_MASK);
         uvec2 fourth = uvec2(down, PATHFINDING_DOWN_MASK);
 
+        // if(side == 1u)
+        // {
+        //     uvec2 tmp = first; first = second; second = tmp;
+        //           tmp = third; third = fourth; fourth = tmp;
+        // }
+
         updateFromNeighbour(first.x & ~updated, updated, updatedDirection, first.y);
         updateFromNeighbour(second.x & ~updated, updated, updatedDirection, second.y);
         updateFromNeighbour(third.x & ~updated, updated, updatedDirection, third.y);

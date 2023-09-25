@@ -19,13 +19,16 @@ _PERMUTATION_PROGRAMS = []
 
 class _PermutationProgram(object):
 
-    def __init__(self, debugging, **shader_type_filepaths):
+    def __init__(self, debugging, spirv, **shader_type_filepaths):
         self._shader_type_filepaths = shader_type_filepaths
-        self._compile = (
-            load_shader_source
-            if debugging
-            else optimize_shader_roundtrip
-        ) 
+        self._spirv = False
+        if debugging:
+            self._compile = load_shader_source
+        elif spirv:
+            self._spirv = True
+            self._compile = load_spirv_compiled
+        else:
+            self._compile = optimize_shader_roundtrip
         self._permutations = {}
         self._one = None
         _PERMUTATION_PROGRAMS.append(self)
@@ -45,6 +48,7 @@ class _PermutationProgram(object):
                 for shader_type, filepath in self._shader_type_filepaths.items()
             }
             self._one = generate_shader_program(
+                spirv=self._spirv,
                 **kwargs
             )
         return self._one
@@ -57,9 +61,76 @@ class _PermutationProgram(object):
                 for shader_type, filepath in self._shader_type_filepaths.items()
             }
             self._permutations[key] = generate_shader_program(
+                spirv=self._spirv,
                 **kwargs
             )
         return self._permutations[key]
+
+
+def spirv_compile(filepath, out_path, macros):
+    command = [
+        _GLSLC_EXEC,
+        "--target-env=opengl4.5",
+        "-O",
+        "-g",
+        filepath,
+        "-o", out_path
+    ]
+    if macros:
+        for key, value in macros.items():
+            command.append("-D{0}={1}".format(key, value))
+    
+    while True:
+        proc = subprocess.Popen(
+            command,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            close_fds=True
+        )
+        stdout, stderr = proc.communicate()
+        if proc.returncode != 0:
+            message = "Commandline:\n{0}".format(
+                subprocess.list2cmdline(command)
+            )
+            if stdout:
+                message = "{0}\n\nSTDOUT:\n{1}".format(
+                    message,
+                    stdout.decode("latin-1").strip()
+                )
+            if stderr:
+                message = "{0}\n\nSTDERR:\n{1}".format(
+                    message,
+                    stderr.decode("latin-1").strip()
+                )
+
+            message = "{0}\n\nRetry?".format(message)
+
+            print(message)
+            retry = askyesno("Shader compiling failed", message)
+
+            if not retry:
+                raise RuntimeError(
+                    "Shader compiling failed:\n{0}".format(message)
+                )
+        else:
+            break
+
+
+def load_spirv_compiled(filepath, macros=None):
+    """Compile directly into spirv words"""
+    if not _GLSLC_EXEC:
+        raise RuntimeError(
+            "In order to use macros and includes glslc "
+            "is needed (install the VulkanSDK)."
+        )
+    tmp = tempfile.NamedTemporaryFile(delete=False)
+    try:
+        tmp.close()
+        spirv_compile(filepath, tmp.name, macros)
+        with open(tmp.name, "rb") as in_fp:
+            return in_fp.read()
+    finally:
+        os.unlink(tmp.name)
 
 
 def optimize_shader_roundtrip(filepath, macros=None):
@@ -81,52 +152,7 @@ def optimize_shader_roundtrip(filepath, macros=None):
     tmp = tempfile.NamedTemporaryFile(delete=False)
     try:
         tmp.close()
-        command = [
-            _GLSLC_EXEC,
-            "--target-env=opengl4.5",
-            "-O",
-            "-g",
-            filepath,
-            "-o", tmp.name
-        ]
-        if macros:
-            for key, value in macros.items():
-                command.append("-D{0}={1}".format(key, value))
-        
-        while True:
-            proc = subprocess.Popen(
-                command,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
-                close_fds=True
-            )
-            stdout, stderr = proc.communicate()
-            if proc.returncode != 0:
-                message = "Commandline:\n{0}".format(
-                    subprocess.list2cmdline(command)
-                )
-                if stdout:
-                    message = "{0}\n\nSTDOUT:\n{1}".format(
-                        message,
-                        stdout.decode("latin-1").strip()
-                    )
-                if stderr:
-                    message = "{0}\n\nSTDERR:\n{1}".format(
-                        message,
-                        stderr.decode("latin-1").strip()
-                    )
-
-                message = "{0}\n\nRetry?".format(message)
-
-                print(message)
-                retry = askyesno("Shader compiling failed", message)
-
-                if not retry:
-                    raise RuntimeError(
-                        "Shader compiling failed:\n{0}".format(message)
-                    )
-            else:
-                break
+        spirv_compile(filepath, tmp.name, macros)
 
         command = [_SPIRV_CROSS_EXEC, tmp.name]
         result = subprocess.Popen(
@@ -186,8 +212,8 @@ def load_shader_source(filepath, macros=None):
     return result
 
 
-def make_permutation_program(debugging, **shader_type_filepaths):
-    return _PermutationProgram(debugging, **shader_type_filepaths)
+def make_permutation_program(debugging, spirv=False, **shader_type_filepaths):
+    return _PermutationProgram(debugging, spirv, **shader_type_filepaths)
 
 
 def clear_compiled_shaders():
