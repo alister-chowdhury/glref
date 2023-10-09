@@ -1,10 +1,13 @@
 #ifndef MAP_ATLAS_COMMON_GLSLI
 #define MAP_ATLAS_COMMON_GLSLI
 
+#include "common.glsli"
+
 #define MAX_ROOMS           32
 #define FINAL_ATLAS_WIDTH   128
 #define FINAL_ATLAS_HEIGHT  128
 #define MAX_LEVEL_DIM       64
+
 
 // There is always a 1px pading around the border
 // as a result when we're using shared memory, we
@@ -123,18 +126,59 @@ uvec4 unpackSectorIds(uint atlasMask)
 }
 
 
+// Checks if a atlas pixel contains a single sector id.
 bool containsSingleSector(uint atlasMask,
                           uint sectorId)
 {
     // We can use a zero byte in word test, to accelerate
     // testing:
     // https://graphics.stanford.edu/~seander/bithacks.html#ZeroInWord
-    sectorId *= 0x01010101u;
+    sectorId = permuteByte(sectorId);
     atlasMask ^= sectorId;
     atlasMask = ((atlasMask + 0x7efefeffu) ^ ~atlasMask) & 0x81010100u;
     // the 0x80 bit is never signed (we never have 128 sectors)
     // so we don't need to test for overflow.
     return atlasMask != 0u;
+}
+
+
+// Checks if two atlas pixels share a common secotr id.
+bool containsSharedSector(uint am0,
+                          uint am1)
+{
+
+    /// !!!!! NOT YET TESTED !!!!!
+
+    // Todo: should probably check if branching
+    //      num > 1,    evaluate second
+    //      num > 2     svaluate third, forth
+    //      accelerates things at runtime.
+
+    // Prevent 0 to 0 compares, by writing 127 into the empty
+    // cells of one of the inputs.
+    uint invalidBitsStart = alignU32(findMSB(am1), 8);
+    am1 |= (0x7f7f7f7fu << invalidBitsStart);
+
+    // We can use a zero byte in word test, to accelerate
+    // testing:
+    // https://graphics.stanford.edu/~seander/bithacks.html#ZeroInWord
+    uint x0 = permuteByte(am0, 0) ^ am1;
+         x0 = ((x0 + 0x7efefeffu) ^ ~x0);
+
+    uint x1 = permuteByte(am0, 1) ^ am1;
+         x1 = ((x1 + 0x7efefeffu) ^ ~x1);
+
+    uint x2 = permuteByte(am0, 2) ^ am1;
+         x2 = ((x0 + 0x7efefeffu) ^ ~x2);
+
+    uint x3 = permuteByte(am0, 3) ^ am1;
+         x3 = ((x3 + 0x7efefeffu) ^ ~x3);
+
+    x0 = (x0 | x1 | x2 | x3) & 0x81010100u;
+
+    // the 0x80 bit is never signed (we never have 128 sectors)
+    // so we don't need to test for overflow.
+    return x0 != 0u;
 }
 
 
