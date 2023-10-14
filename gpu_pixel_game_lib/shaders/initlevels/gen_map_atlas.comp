@@ -210,14 +210,14 @@ void renderBsp(uint tid, MapAtlasLevelInfo atlasInfo)
         ivec2 localCoord = ivec2(uvec2(it % MAX_LEVEL_DIM_SHARED_SIZE, it / MAX_LEVEL_DIM_SHARED_SIZE))
                             + ivec2(MAX_LEVEL_DIM_SHARED_OFFSET);
 
-        uint nextSectorId = 0u;
-        uint pixelId = 0u;
+        sector_id_t prevSectorId = (ATLAS_ROOM_ID_BEGIN - 1);
+        packed_sector_ids_t pixelId = 0u;
 
         for(uint i=0; i<MAX_ROOMS; ++i)
         {
             ivec4 nodeSpan = unpackBspNode(bspQueue[i]).span;
             if(nodeSpan.x == nodeSpan.z) { continue; }
-            uint sectorId = ++nextSectorId;
+            uint sectorId = ++prevSectorId;
 
             // Already found the room under this pixel, at this point
             // we're just counting the number of valid rooms
@@ -230,12 +230,13 @@ void renderBsp(uint tid, MapAtlasLevelInfo atlasInfo)
             }
         }
 
+        prevSectorId = (ATLAS_PATH_ID_BEGIN - 1);
         for(uint i=0; i<MAX_PATHS; ++i)
         {
             ivec4 pathSpan = unpackSpan(pathQueue[i]);
             if(pathSpan.x == pathSpan.z) { continue; }
 
-            uint sectorId = ++nextSectorId;
+            uint sectorId = ++prevSectorId;
 
             if(localCoord.x >= pathSpan.x && localCoord.x < pathSpan.z
                 && localCoord.y >= pathSpan.y && localCoord.y < pathSpan.w)

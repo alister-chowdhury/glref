@@ -9,6 +9,19 @@
 #define MAX_LEVEL_DIM       64
 
 
+// A room value of 0, is unassigned
+#define ATLAS_ROOM_ID_EMPTY     0
+
+// A value of [1, 32] is a room
+#define ATLAS_ROOM_ID_BEGIN     1
+#define ATLAS_ROOM_ID_LAST      32
+
+// A value of [33, 63] is a path
+#define ATLAS_PATH_ID_BEGIN     33
+#define ATLAS_PATH_ID_LAST      63
+
+
+
 // There is always a 1px pading around the border
 // as a result when we're using shared memory, we
 // can limit the amount of resources needed.
@@ -17,6 +30,13 @@
 
 
 #define packed_span_t   uint
+
+#define packed_sector_ids_t  uint
+
+#define sector_id_t     uint
+#define sector_id_t2    uvec2
+#define sector_id_t3    uvec3
+#define sector_id_t4    uvec4
 
 
 ivec4 unpackSpan(packed_span_t x)
@@ -117,18 +137,23 @@ struct MapAtlasLevelData
 // We store a maximum of 4 sectors per pixel, each
 // using 8 bits, with the maximum value being 64.
 
-uvec4 unpackSectorIds(uint atlasMask)
+sector_id_t4 unpackSectorIds(packed_sector_ids_t atlasMask)
 {
-    return uvec4((atlasMask      ) & 0xffu,
-                 (atlasMask >> 8 ) & 0xffu,
-                 (atlasMask >> 16) & 0xffu,
-                  atlasMask >> 24);
+    return sector_id_t4((atlasMask      ) & 0xffu,
+                        (atlasMask >> 8 ) & 0xffu,
+                        (atlasMask >> 16) & 0xffu,
+                         atlasMask >> 24);
 }
 
 
+bool isSectorIdEmpty(sector_id_t idx) { return idx == ATLAS_ROOM_ID_EMPTY; }
+bool isSectorIdRoom(sector_id_t idx) { return (idx >= ATLAS_ROOM_ID_BEGIN) && (idx <= ATLAS_ROOM_ID_LAST); }
+bool isSectorIdPath(sector_id_t idx) { return (idx >= ATLAS_PATH_ID_BEGIN) && (idx <= ATLAS_PATH_ID_LAST); }
+
+
 // Checks if a atlas pixel contains a single sector id.
-bool containsSingleSector(uint atlasMask,
-                          uint sectorId)
+bool containsSingleSector(packed_sector_ids_t atlasMask,
+                          sector_id_t sectorId)
 {
     // We can use a zero byte in word test, to accelerate
     // testing:
@@ -143,8 +168,8 @@ bool containsSingleSector(uint atlasMask,
 
 
 // Checks if two atlas pixels share a common secotr id.
-bool containsSharedSector(uint am0,
-                          uint am1)
+bool containsSharedSector(packed_sector_ids_t am0,
+                          packed_sector_ids_t am1)
 {
 
     /// !!!!! NOT YET TESTED !!!!!
