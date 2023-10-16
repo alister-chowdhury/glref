@@ -16,17 +16,25 @@
 #endif // TARGET_NVIDIA
 
 
-uint simpleHash32(uvec3 Seed)
+uint simpleHash32(uvec3 seed)
 {
-    uint hx = (0xb543c3a6u ^ Seed.x);
-    uint hy = (0x526f94e2u ^ Seed.y);
+    uint hx = (0xb543c3a6u ^ seed.x);
+    uint hy = (0x526f94e2u ^ seed.y);
     uint hxy = hx * hy;
     uint hz0 = 0x53c5ca59u ^ (hxy >> 5u);
-    uint hz1 = (0x74743c1bu ^ Seed.z);
+    uint hz1 = (0x74743c1bu ^ seed.z);
     uint h = hz0 * hz1;
     return h;
 }
 
+
+uint simpleHash32_u2v0(uvec2 seed)
+{
+    uint hx = (seed.x ^ 0xcac9442u);
+    uint hy = (seed.y ^ 0x526ed7c6u);
+    uint hz = (hx * hy) ^ 0xc4ab2ac2u;
+    return hz * 0x526f94e3u;
+}
 
 uint wang_hash(uint seed)
 {
@@ -93,7 +101,7 @@ uint permuteByte(uint byte, uint index)
 
 uint alignU32(uint x, uint a)
 {
-    // Should be tow full rate instructions, assuming
+    // Should be two full rate instructions, assuming
     // a is valid 
     uint m = a - 1;
     return (x + m) & ~m;

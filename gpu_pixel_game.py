@@ -4,6 +4,7 @@ import os
 import numpy
 
 from OpenGL.GL import *
+from PIL import Image
 
 import viewport
 import gpu_pixel_game_lib
@@ -45,6 +46,18 @@ _DEBUG_VIS_PATHFINDING_DIRECTIONS_PROGRAM = viewport.make_permutation_program(
     GL_FRAGMENT_SHADER = gpu_pixel_game_lib.DEBUG_VIS_PATHFINDING_DIRECTIONS_FRAG
 )
 
+_RENDER_MAP_BACKGROUND_PROGRAM = viewport.make_permutation_program(
+    _DEBUGGING,
+    GL_VERTEX_SHADER = gpu_pixel_game_lib.RENDER_MAP_BACKGROUND_VERT,
+    GL_FRAGMENT_SHADER = gpu_pixel_game_lib.RENDER_MAP_BACKGROUND_FRAG
+)
+
+_DEBUG_TEST_BACKGROUND_NORMALS_PROGRAM = viewport.make_permutation_program(
+    _DEBUGGING,
+    GL_VERTEX_SHADER = _DRAW_FULL_SCREEN_PATH,
+    GL_FRAGMENT_SHADER = gpu_pixel_game_lib.DEBUG_TEST_BACKGROUND_NORMALS_FRAG
+)
+
 LEVEL_TILES_X = 128
 LEVEL_TILES_Y = 128
 
@@ -60,17 +73,71 @@ class Renderer(object):
         self.window.on_draw = self._draw
         self.window.on_resize = self._resize
         self.window.on_drag = self._drag
+        self.window.on_mouse = self._mouse
         self.window.on_keypress = self._keypress
 
-        self._n = 0
+        self._n = -1
         self._vis_pf_level = 0
         self._vis_pf_room = 0
+        self._mouse_uv = (0.5, 0.5)
 
     def run(self):
         self.window.run()
+
+
+    @staticmethod
+    def _load_asset_png(png_path):
+        asset_image = Image.open(png_path)
+        asset_image_data = numpy.array(asset_image.getdata(), dtype=numpy.uint8)
+        texture_ptr = ctypes.c_int()
+        glCreateTextures(GL_TEXTURE_2D, 1, texture_ptr)
+        asset_tex = texture_ptr.value
+
+        glTextureParameteri(asset_tex, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE)
+        glTextureParameteri(asset_tex, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE)
+        glTextureParameteri(asset_tex, GL_TEXTURE_MIN_FILTER, GL_NEAREST)
+        glTextureParameteri(asset_tex, GL_TEXTURE_MAG_FILTER, GL_NEAREST)
+
+        glTextureStorage2D(
+            asset_tex,
+            1,
+            GL_RGBA8,
+            asset_image.width,
+            asset_image.height
+        )
+        glTextureSubImage2D(
+            asset_tex, 0, 0, 0,
+            asset_image.width,
+            asset_image.height,
+            GL_RGBA, GL_UNSIGNED_BYTE,
+            asset_image_data
+        )
+        return asset_tex
     
     def _init(self, wnd):
         glClearColor(0.0, 0.0, 0.0, 0.0)
+
+        buffer_ptr = (ctypes.c_int * 1)()
+        with open(gpu_pixel_game_lib.ASSET_ATLAS_DATA, "rb") as in_fp:
+            asset_atlas_data = in_fp.read()
+        glCreateBuffers(1, buffer_ptr)
+        self._asset_atlas_data = buffer_ptr[0]
+        glNamedBufferStorage(self._asset_atlas_data, len(asset_atlas_data), asset_atlas_data, 0)
+
+        self._asset_atlas_base = self._load_asset_png(
+            gpu_pixel_game_lib.ASSET_ATLAS_BASE
+        )
+        self._asset_atlas_norm = self._load_asset_png(
+            gpu_pixel_game_lib.ASSET_ATLAS_NORM
+        )
+
+        self._active_background_map_base = viewport.FramebufferTarget(GL_RGBA8, True)
+        self._active_background_map_norm = viewport.FramebufferTarget(GL_RGBA8, True)
+        self._active_background_map = viewport.Framebuffer(
+            (self._active_background_map_base, self._active_background_map_norm),
+            64 * 16,
+            64 * 16
+        )
 
         global_parameters = numpy.array(
             [
@@ -191,6 +258,27 @@ class Renderer(object):
         glUniform2ui(0, self._vis_pf_level, self._vis_pf_room + 1)
         glDrawArrays(GL_TRIANGLES, 0, 64 * 64 * 6)
 
+        with self._active_background_map.bind():
+            glViewport(0, 0, 64 * 16, 64 * 16)
+            glUseProgram(_RENDER_MAP_BACKGROUND_PROGRAM.one())
+            glBindBufferBase(GL_UNIFORM_BUFFER, 0, self._global_parameters)
+            glBindImageTexture(1, self._map_atlas, 0, False, 0, GL_READ_ONLY, GL_R32UI)
+            glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 2, self._asset_atlas_data)
+            glBindImageTexture(3, self._asset_atlas_base, 0, False, 0, GL_READ_ONLY, GL_RGBA8)
+            glBindImageTexture(4, self._asset_atlas_norm, 0, False, 0, GL_READ_ONLY, GL_RGBA8)
+            glDrawArrays(GL_TRIANGLES, 0, 64 * 64 * 6)
+        glViewport(0, 0, wnd.width, wnd.height)
+
+
+        glUseProgram(_DEBUG_TEST_BACKGROUND_NORMALS_PROGRAM.get(VS_OUTPUT_UV=0))
+        glBindBufferBase(GL_UNIFORM_BUFFER, 0, self._global_parameters)
+        glBindTextureUnit(1, self._active_background_map_base.texture)
+        glBindTextureUnit(2, self._active_background_map_norm.texture)
+        glUniform2f(0, self._mouse_uv[0], 1 - self._mouse_uv[1])
+        glDrawArrays(GL_TRIANGLES, 0, 3)
+
+        # self._active_background_map.blit_to_back(wnd.width, wnd.height)
+
         wnd.redraw()
 
 
@@ -202,6 +290,7 @@ class Renderer(object):
         # CTRL-R
         if key == b'\x12':
             viewport.clear_compiled_shaders()
+            print("RECOMPILIN SHADERS")
 
         elif key == b'l':
             self._vis_pf_level = (self._vis_pf_level + 1) & 7
@@ -220,37 +309,46 @@ class Renderer(object):
             print("Room =", self._vis_pf_room + 1)
 
         elif key == b'c':
-            glDeleteBuffers(1, self._buffers_ptr)
-            glCreateBuffers(1, self._buffers_ptr)
-            self._global_parameters = self._buffers_ptr[0]
-            global_parameters = numpy.array(
-                [
-                    0,          # cpuTime
-                    0,          # cpuAnimFrame
-                    0,          # cpuAnimTick
-                    self._n, # cpuRandom
-
-                    0,          # pipelineStage
-                    0,          # levelGenSeed
-                    0,          # currentLevel
-                    0,          # currentLevelMapStart
-                    0,          # currentLevelMapEnd
-                    0,          # numLines
-                    0,          # numLights
-                    # Padding
-                    0,
-                ],
-                dtype=numpy.uint32
-            ).tobytes()
-            glNamedBufferStorage(self._global_parameters, len(global_parameters), global_parameters, 0)
-
             self._n += 1
+
+        glDeleteBuffers(1, self._buffers_ptr)
+        glCreateBuffers(1, self._buffers_ptr)
+        self._global_parameters = self._buffers_ptr[0]
+        global_parameters = numpy.array(
+            [
+                0,          # cpuTime
+                0,          # cpuAnimFrame
+                0,          # cpuAnimTick
+                self._n, # cpuRandom
+
+                0,          # pipelineStage
+                0,          # levelGenSeed
+                self._vis_pf_level,          # currentLevel
+                0,          # currentLevelMapStart
+                0,          # currentLevelMapEnd
+                0,          # numLines
+                0,          # numLights
+                # Padding
+                0,
+            ],
+            dtype=numpy.uint32
+        ).tobytes()
+        glNamedBufferStorage(self._global_parameters, len(global_parameters), global_parameters, 0)
+
 
         wnd.redraw()
 
     def _drag(self, wnd, x, y, button):
         deriv_u = x / wnd.width
         deriv_v = y / wnd.height
+        self._mouse_uv = (
+            self._mouse_uv[0] + deriv_u,
+            self._mouse_uv[1] + deriv_v
+        )
+        wnd.redraw()
+
+    def _mouse(self, wnd, button, state, x, y):
+        self._mouse_uv = (x / wnd.width, y / wnd.height)
         wnd.redraw()
 
 if __name__ == "__main__":

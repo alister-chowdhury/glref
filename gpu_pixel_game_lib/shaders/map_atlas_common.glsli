@@ -150,6 +150,16 @@ bool isSectorIdEmpty(sector_id_t idx) { return idx == ATLAS_ROOM_ID_EMPTY; }
 bool isSectorIdRoom(sector_id_t idx) { return (idx >= ATLAS_ROOM_ID_BEGIN) && (idx <= ATLAS_ROOM_ID_LAST); }
 bool isSectorIdPath(sector_id_t idx) { return (idx >= ATLAS_PATH_ID_BEGIN) && (idx <= ATLAS_PATH_ID_LAST); }
 
+bool hasAnySectors(packed_sector_ids_t atlasMask)
+{
+    return atlasMask != (
+        ATLAS_ROOM_ID_EMPTY
+        | (ATLAS_ROOM_ID_EMPTY << 8)
+        | (ATLAS_ROOM_ID_EMPTY << 16)
+        | (ATLAS_ROOM_ID_EMPTY << 24)
+    );;
+}
+
 
 // Checks if a atlas pixel contains a single sector id.
 bool containsSingleSector(packed_sector_ids_t atlasMask,

@@ -1,6 +1,6 @@
 #version 460 core
 
-// dispatch LG_TRIANGLES, 128*128*6
+// dispatch GL_TRIANGLES, 128*128*6
 
 
 #include "../common.glsli"
