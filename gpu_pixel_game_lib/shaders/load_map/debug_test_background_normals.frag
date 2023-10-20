@@ -35,17 +35,20 @@ void main()
     vec4 normAndZ = texture(normTexture, scaledUv);
     vec3 norm = normalize(normAndZ.xyz * 2 - 1);
     float Z = normAndZ.w;
-    float maxZ = 16.0 / 64.0;
+    float maxZLight = 8.0 / 64.0;
+    float maxZ = 1.0 / 64.0;
+    scaledUv.y -= maxZ * Z;
 
-    vec3 lightSource3D = vec3(lightSource * levelToScreenScale, maxZ);
+    vec3 lightSource3D = vec3(lightSource * levelToScreenScale, maxZLight);
     vec3 source3D = vec3(scaledUv, maxZ * normAndZ.w);
     vec3 dL = lightSource3D - source3D;
 
     vec3 L = normalize(dL);
     float damp = evaluatePointLightAttenuation(length(dL), 5);
-    damp *= 4;
-    // damp = max(0, min(1, damp));
+    damp *=4;
+    damp = max(0, min(1, damp));
     outCol = vec4(max(0, min(1, dot(norm, L))) * base * damp, 1);
+
     // outCol.xyz = base;
     // outCol.xyz = L;
     // outCol.xyz = vec3(abs(dot(norm, L)));
