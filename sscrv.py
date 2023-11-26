@@ -26,6 +26,7 @@ import numpy
 from OpenGL.GL import *
 
 import viewport
+import perf_overlay_lib
 
 
 DRAW_N_VERTEX_SHADER_SOURCE = """
@@ -264,7 +265,7 @@ class Renderer(object):
         self.window.on_resize = self._resize
         self.window.on_drag = self._drag
         self.window.on_keypress = self._keypress
-
+        self.timer_overlay = perf_overlay_lib.TimerSamples256Overlay()
         self.main_geom = None
 
     def run(self):
@@ -337,6 +338,7 @@ class Renderer(object):
 
     def _draw(self, wnd):
         # Draw stencil-depth
+        glEnable(GL_STENCIL_TEST)
         with self._framebuffer.bind():
             glStencilFunc(GL_ALWAYS, 1, 0xFF)
             glStencilOp(GL_KEEP, GL_KEEP, GL_REPLACE)
@@ -368,6 +370,9 @@ class Renderer(object):
         glClear(GL_COLOR_BUFFER_BIT)
         self._framebuffer2.blit_to_back(wnd.width, wnd.height, GL_COLOR_BUFFER_BIT, GL_NEAREST)
 
+        glDisable(GL_STENCIL_TEST)
+        self.timer_overlay.update(wnd.width, wnd.height)
+        wnd.redraw()
 
     def _resize(self, wnd, width, height):
         self._framebuffer.resize(width, height)

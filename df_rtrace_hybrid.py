@@ -1,56 +1,32 @@
 
 import os
+from math import cos, sin, pi, log2
 
 import numpy
 
 from OpenGL.GL import *
 
 import viewport
+import line_df_hybrid
 import perf_overlay_lib
 
 _DEBUGGING = False
-
 
 _SHADER_DIR = os.path.abspath(
     os.path.join(__file__, "..", "shaders")
 )
 
-_BVH_SHADER_DIR = os.path.join(_SHADER_DIR, "grid_based_bvh")
-
 _DRAW_FULL_SCREEN_PATH = os.path.join(
     _SHADER_DIR, "draw_full_screen.vert"
 )
 
-_GENERATE_BVH_PROGRAM = viewport.make_permutation_program(
-    _DEBUGGING,
-    GL_COMPUTE_SHADER = os.path.join(_BVH_SHADER_DIR, "generate_bvh.comp")
-)
-
-
-_DRAW_BVH_0_PROGRAM = viewport.make_permutation_program(
-    _DEBUGGING,
-    GL_VERTEX_SHADER = os.path.join(_BVH_SHADER_DIR, "draw_bvh_0.vert"),
-    GL_FRAGMENT_SHADER = os.path.join(_BVH_SHADER_DIR, "draw_vec3.frag")
-)
-
-_DRAW_LINES_PROGRAM = viewport.make_permutation_program(
-    _DEBUGGING,
-    GL_VERTEX_SHADER = os.path.join(_BVH_SHADER_DIR, "draw_lines.vert"),
-    GL_FRAGMENT_SHADER = os.path.join(_BVH_SHADER_DIR, "draw_vec3.frag")
-)
-
-_DRAW_V2_TRACE_TEST_PROGRAM = viewport.make_permutation_program(
+_DRAW_V1_TRACE_TEST_PROGRAM = viewport.make_permutation_program(
     _DEBUGGING,
     GL_VERTEX_SHADER = _DRAW_FULL_SCREEN_PATH,
-    GL_FRAGMENT_SHADER = os.path.join(_BVH_SHADER_DIR, "v2_tracing_test.frag")
+    GL_FRAGMENT_SHADER = line_df_hybrid.V1_TRACING_TEST_FRAG
 )
 
-_DRAW_V2_DF_PROGRAM = viewport.make_permutation_program(
-    _DEBUGGING,
-    GL_VERTEX_SHADER = _DRAW_FULL_SCREEN_PATH,
-    GL_FRAGMENT_SHADER = os.path.join(_BVH_SHADER_DIR, "df_v2_tracing_test.frag")
-)
-
+DF_RESOLUTION = 32
 
 class Renderer(object):
 
@@ -68,11 +44,9 @@ class Renderer(object):
         self._test_pos_x = 0.5
         self._test_pos_y = 0.5
 
-        self._debug_type = 0
-        self._tracing_test = 1
-        self._distance_field = 0
-
+        self.draw_lines = True
         self.timer_overlay = perf_overlay_lib.TimerSamples256Overlay()
+
 
     def run(self):
         self.window.run()
@@ -80,13 +54,7 @@ class Renderer(object):
     def _init(self, wnd):
         glClearColor(0.0, 0.0, 0.0, 0.0)
 
-        self._buffers_ptr = (ctypes.c_int * 2)()
-        glCreateBuffers(2, self._buffers_ptr)
-
-        self._lines_buffer = self._buffers_ptr[0]
-        self._bvh_buffer = self._buffers_ptr[1]
-
-        lines = (numpy.array([
+        lines_data = (numpy.array([
             -0.8, 0.8, -0.8, 0.6,
             -0.8, 0.6, -0.8, 0.4,
             -0.8, 0.4, -0.6, 0.2,
@@ -243,87 +211,77 @@ class Renderer(object):
             0.2562976930939136, 0.5772909187551378, 0.1285453211868255, 0.614041601084574,
         ], dtype=numpy.float32)
             * 0.5 + 0.5
-        ).tobytes()
+        )
+    
+        lines_data = lines_data.reshape((len(lines_data)//4, 4))
+        self._num_lines = len(lines_data)
+        lines_texture_ptr = ctypes.c_int()
+        glCreateTextures(GL_TEXTURE_1D, 1, lines_texture_ptr)
+        self._lines_texture = lines_texture_ptr.value
+        glTextureStorage1D(self._lines_texture, 1, GL_RGBA32F, self._num_lines)
+        glTextureParameteri(self._lines_texture, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE)
+        glTextureParameteri(self._lines_texture, GL_TEXTURE_MIN_FILTER, GL_NEAREST)
+        glTextureParameteri(self._lines_texture, GL_TEXTURE_MAG_FILTER, GL_NEAREST)
+        glTextureSubImage1D(
+            self._lines_texture, 0, 0,
+            self._num_lines,
+            GL_RGBA, GL_FLOAT,
+            lines_data.tobytes()
+        )
 
-        self._num_lines = len(lines) // 16
+        df_texture_data, lines_buffer_data = line_df_hybrid.build_line_df_hybrid_v1(
+            lines_data,
+            DF_RESOLUTION
+        )
 
-        # We can dervive the number of nodes data anayltically:
-        #
-        # Every 2z2 nodes will be reduced into:
-        #   [2x2] => [1x2] or [2x1] => [1x1]
-        #
-        # Whats beautiful is that this gets negated by the 1/3 multiplier
-        # you use to calculate the size of a mip chain.
-        # [N x N] + [N/2 x N/2] + [N/4 x N/4] + ... = N * N/3
-        #
-        # So the actual number of nodes is (gridsize^2 - 1).
+        df_texture_ptr = ctypes.c_int()
+        glCreateTextures(GL_TEXTURE_2D, 1, df_texture_ptr)
+        self._df_texture = df_texture_ptr.value
+        glTextureStorage2D(self._df_texture, 1, GL_R32UI, DF_RESOLUTION, DF_RESOLUTION)
+        glTextureParameteri(self._df_texture, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE)
+        glTextureParameteri(self._df_texture, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE)
+        glTextureParameteri(self._df_texture, GL_TEXTURE_MIN_FILTER, GL_NEAREST)
+        glTextureParameteri(self._df_texture, GL_TEXTURE_MAG_FILTER, GL_NEAREST)
+        glTextureSubImage2D(
+            self._df_texture, 0, 0, 0,
+            DF_RESOLUTION, DF_RESOLUTION,
+            GL_RED_INTEGER, GL_UNSIGNED_INT,
+            df_texture_data.tobytes()
+        )
 
-        node_float4_size = 3
-        float4_bytes = 4 * 4
-        grid_size = 8
-        num_nodes = (grid_size * grid_size - 1)
-        bvh_size_float4 = num_nodes * node_float4_size + self._num_lines
+        lines_buffer_texture_ptr = ctypes.c_int()
+        glCreateTextures(GL_TEXTURE_1D, 1, lines_buffer_texture_ptr)
+        self._lines_buffer_texture = lines_buffer_texture_ptr.value
+        glTextureStorage1D(self._lines_buffer_texture, 1, GL_RGBA32F, len(lines_buffer_data))
+        glTextureParameteri(self._lines_buffer_texture, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE)
+        glTextureParameteri(self._lines_buffer_texture, GL_TEXTURE_MIN_FILTER, GL_NEAREST)
+        glTextureParameteri(self._lines_buffer_texture, GL_TEXTURE_MAG_FILTER, GL_NEAREST)
+        glTextureSubImage1D(
+            self._lines_buffer_texture, 0, 0,
+            len(lines_buffer_data),
+            GL_RGBA, GL_FLOAT,
+            lines_buffer_data.tobytes()
+        )
 
-        glNamedBufferStorage(self._lines_buffer, len(lines), lines, 0)
-        glNamedBufferStorage(self._bvh_buffer, bvh_size_float4 * float4_bytes, None, 0)
-
+        glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT)
         glViewport(0, 0, wnd.width, wnd.height)
 
 
     def _draw(self, wnd):
         glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT)
-        glEnable(GL_DEPTH_TEST)
 
-
-        if self._tracing_test:
-            glUseProgram(_GENERATE_BVH_PROGRAM.get(DEBUG_LEVEL=0))
-            glUniform1ui(0, self._num_lines)
-            glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 0, self._lines_buffer)
-            glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 1, self._bvh_buffer)
-            glDispatchCompute(1, 1, 1)
-
-            if self._distance_field:
-                glUseProgram(_DRAW_V2_DF_PROGRAM.get(
-                    VS_OUTPUT_UV=0,
-                    LINE_BVH_V2_BINDING=0,
-                ))
-            else:
-                glUseProgram(_DRAW_V2_TRACE_TEST_PROGRAM.get(
-                    VS_OUTPUT_UV=0,
-                    LINE_BVH_V2_BINDING=0,
-                ))
-                glUniform2f(0, self._test_pos_x, self._test_pos_y)
-            glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 0, self._bvh_buffer)
-            glBindVertexArray(viewport.get_dummy_vao())
-            glDrawArrays(GL_TRIANGLES, 0, 3)
-
-
-        else:
-            glUseProgram(_GENERATE_BVH_PROGRAM.get(DEBUG_LEVEL=self._debug_type))
-            glUniform1ui(0, self._num_lines)
-            glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 0, self._lines_buffer)
-            glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 1, self._bvh_buffer)
-            glDispatchCompute(1, 1, 1)
-
-            glUseProgram(_DRAW_BVH_0_PROGRAM.get(DEBUG_LEVEL_BBOXES=int(self._debug_type > 0)))
-            glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 0, self._bvh_buffer)
-            glBindVertexArray(viewport.get_dummy_vao())
-
-            if self._debug_type == 0:
-                glDrawArrays(GL_TRIANGLES, 0, 64 * 6)
-            elif self._debug_type == 1:
-                glDrawArrays(GL_TRIANGLES, 0, 64 * 6)
-            elif self._debug_type == 2:
-                glDrawArrays(GL_TRIANGLES, 0, 16 * 6)
-            else:
-                glDrawArrays(GL_TRIANGLES, 0, 4 * 6)
-
-
-        glDisable(GL_DEPTH_TEST)
-        glUseProgram(_DRAW_LINES_PROGRAM.get())
-        glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 0, self._lines_buffer)
+        glUseProgram(_DRAW_V1_TRACE_TEST_PROGRAM.get(
+            VS_OUTPUT_UV=0,
+            DF_RTRACE_DFTEX_V1_LOC=0,
+            DF_RTRACE_LINES_V1_LOC=1,
+            DF_RTRACE_PARAMS_V1_LOC=1,
+        ))
+        glBindTextureUnit(0, self._df_texture)
+        glBindTextureUnit(1, self._lines_buffer_texture)
+        glUniform2f(0, self._test_pos_x, self._test_pos_y)
+        glUniform4f(1, DF_RESOLUTION, 0, 0, 0)
         glBindVertexArray(viewport.get_dummy_vao())
-        glDrawArrays(GL_LINES, 0, 2 * self._num_lines)
+        glDrawArrays(GL_TRIANGLES, 0, 3)
 
         self.timer_overlay.update(wnd.width, wnd.height)
         wnd.redraw()
@@ -333,15 +291,10 @@ class Renderer(object):
         glViewport(0, 0, width, height)
 
     def _keypress(self, wnd, key, x, y):
-        if key == b'd':
-            self._debug_type += 1
-            self._debug_type %= 4
-        elif key == b't':
-            self._tracing_test ^= 1
-        elif key == b'f':
-            self._distance_field ^= 1
-        elif key == b'c':
-            self.timer_overlay.update_mode ^= 1
+        # CTRL-R
+        if key == b'\x12':
+            viewport.clear_compiled_shaders()
+            print("RECOMPILIN SHADERS")
         wnd.redraw()
 
     def _drag(self, wnd, x, y, button):

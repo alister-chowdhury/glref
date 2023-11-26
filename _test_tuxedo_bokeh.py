@@ -6,6 +6,7 @@ from PIL import Image   # poor mans OIIO
 from OpenGL.GL import *
 
 import viewport
+import perf_overlay_lib
 
 
 VERTEX_GRASS_SHADER_SOURCE = """
@@ -278,7 +279,7 @@ class Renderer(object):
         self.window.on_resize = self._resize
         self.window.on_drag = self._drag
         self.window.on_keypress = self._keypress
-
+        self.timer_overlay = perf_overlay_lib.TimerSamples256Overlay()
         self._buffers_ptr = None
 
     def run(self):
@@ -507,6 +508,9 @@ class Renderer(object):
         glUniform2f(0, 1/wnd.width, 1/wnd.height)
         glUniform1f(1, 10.0)
         glDrawArrays(GL_TRIANGLE_STRIP, 0, 4)
+
+        self.timer_overlay.update(wnd.width, wnd.height)
+        wnd.redraw()
 
         # glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT)
         # glEnable(GL_BLEND)

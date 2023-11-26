@@ -72,6 +72,10 @@ class TimerSamples256Overlay(object):
             1.0
         )
 
+        # 0 - ms
+        # 1 - fps
+        self.update_mode = 1
+
     def toggle(self):
         self._enabled = not self._enabled
         self._last_time = 0
@@ -174,11 +178,12 @@ class TimerSamples256Overlay(object):
             self._last_display_update = now
             glUseProgram(_RESET_TIMER_SAMPLES.one())
         else:
-            updateDisplay = now - self._last_display_update > 0.05
-            if updateDisplay:
+            update_display = now - self._last_display_update > 0.05
+            if update_display:
                 self._last_display_update = now
             glUseProgram(_APPEND_TIMER_SAMPLE.get(
-                UPDATE_DISPLAY=int(updateDisplay)
+                UPDATE_DISPLAY=int(update_display),
+                CONVERT_DISPAY_TEXT_TO_FPS=int(self.update_mode)
             ))
         glBindBufferRange(GL_SHADER_STORAGE_BUFFER, 0, self._timer256_ssbo, 0, _SIZEOF_TIMER_SAMPLES_256)
         glUniform1f(0, delta_ms)

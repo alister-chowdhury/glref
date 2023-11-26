@@ -1,5 +1,11 @@
 #version 460 core
 
+// TODO
+// Rewrite this so its easier to arbitarily
+// change the dim size, 16x16 should also fit
+// inside of the LDS limit
+
+
 #define BUCKET_SIZE_DIM 8
 
 layout(local_size_x=BUCKET_SIZE_DIM, local_size_y=BUCKET_SIZE_DIM) in;
@@ -16,7 +22,11 @@ writeonly layout(std430, binding = 1) buffer outBVH_ { vec4 outBVH[]; };
 #define MAKE_LINEAR_ID(tid, brickSize) ((tid).y * (brickSize) + (tid).x)
 
 
+#ifdef VULKAN
+layout(binding=2) uniform numLines_ { uint numLines; };
+#else // VULKAN
 layout(location=0) uniform uint numLines;
+#endif // VULKAN
 
 
 vec4 mergeBounds(vec4 a, vec4 b)
@@ -100,10 +110,16 @@ BVHNodeEntry writeBVHLevel(uint outputOffset,
     return writeBVHNode(outputOffset, left, right);
 }
 
-shared uint bucketAllocator[BUCKET_SIZE_DIM * BUCKET_SIZE_DIM];
-shared BVHNodeEntry nodeDataSwapA[BUCKET_SIZE_DIM * BUCKET_SIZE_DIM];
-shared BVHNodeEntry nodeDataSwapB[(BUCKET_SIZE_DIM / 2) * (BUCKET_SIZE_DIM / 2)];
 
+shared uint bucketAllocator[BUCKET_SIZE_DIM * BUCKET_SIZE_DIM];                     // 256 bytes
+shared BVHNodeEntry nodeDataSwapA[BUCKET_SIZE_DIM * BUCKET_SIZE_DIM];               // 1792 or 2048 bytes
+shared BVHNodeEntry nodeDataSwapB[(BUCKET_SIZE_DIM / 2) * (BUCKET_SIZE_DIM / 2)];   // 448 or 512 bytes
+
+
+uint getNodeLevelOffset(uint level)
+{
+    return ((1u << (level + level)) - 1u) * BVH_V2_NODE_FLOAT4_STRIDE;
+}
 
 
 void main()
@@ -163,6 +179,11 @@ void main()
     // Next we need to figure out what the offset
     // this bucket should start writing 
 
+
+    // todo: swap this out for like
+    //  offset = (1 << (level + level)) - 1;    // basically 4*n - 1
+    //  offset *= (3u * BVH_V2_NODE_FLOAT4_STRIDE);
+
     const uint nodeOffsetLevel0 = 0u;
     const uint nodeSizeLevel0 = 3u * BVH_V2_NODE_FLOAT4_STRIDE;
 
@@ -173,6 +194,13 @@ void main()
     const uint nodeSizeLevel2 = 4u * nodeSizeLevel1;
 
     const uint bucketLinesStartOffset = nodeOffsetLevel2 + nodeSizeLevel2;
+
+
+    // // This does work, but its less obvious what ss happening, fixup later
+    // const uint nodeOffsetLevel0 = getNodeLevelOffset(0u);
+    // const uint nodeOffsetLevel1 = getNodeLevelOffset(1u);
+    // const uint nodeOffsetLevel2 = getNodeLevelOffset(2u);
+    // const uint bucketLinesStartOffset = getNodeLevelOffset(3u);
 
 
     uint bucketWriteOffset = bucketLinesStartOffset;
