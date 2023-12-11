@@ -68,8 +68,10 @@ class Renderer(object):
         self._test_pos_x = 0.5
         self._test_pos_y = 0.5
 
-        self._debug_type = 0
-        self._tracing_test = 1
+        self._debugging = 0
+        self._debug_level = 0
+        self._bvh_levels = 3
+
         self._distance_field = 0
 
         self.timer_overlay = perf_overlay_lib.TimerSamples256Overlay()
@@ -258,10 +260,12 @@ class Renderer(object):
         #
         # So the actual number of nodes is (gridsize^2 - 1).
 
+        max_grid_level = 4
+
         node_float4_size = 3
         float4_bytes = 4 * 4
-        grid_size = 8
-        num_nodes = (grid_size * grid_size - 1)
+        max_grid_size = (1 << max_grid_level)
+        num_nodes = (max_grid_size * max_grid_size - 1)
         bvh_size_float4 = num_nodes * node_float4_size + self._num_lines
 
         glNamedBufferStorage(self._lines_buffer, len(lines), lines, 0)
@@ -275,8 +279,8 @@ class Renderer(object):
         glEnable(GL_DEPTH_TEST)
 
 
-        if self._tracing_test:
-            glUseProgram(_GENERATE_BVH_PROGRAM.get(DEBUG_LEVEL=0))
+        if not self._debugging:
+            glUseProgram(_GENERATE_BVH_PROGRAM.get(NUM_LEVELS=self._bvh_levels))
             glUniform1ui(0, self._num_lines)
             glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 0, self._lines_buffer)
             glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 1, self._bvh_buffer)
@@ -291,6 +295,7 @@ class Renderer(object):
                 glUseProgram(_DRAW_V2_TRACE_TEST_PROGRAM.get(
                     VS_OUTPUT_UV=0,
                     LINE_BVH_V2_BINDING=0,
+                    LINE_BVH_V2_STACK_SIZE=(self._bvh_levels*2)
                 ))
                 glUniform2f(0, self._test_pos_x, self._test_pos_y)
             glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 0, self._bvh_buffer)
@@ -299,24 +304,22 @@ class Renderer(object):
 
 
         else:
-            glUseProgram(_GENERATE_BVH_PROGRAM.get(DEBUG_LEVEL=self._debug_type))
+            glUseProgram(
+                _GENERATE_BVH_PROGRAM.get(
+                    NUM_LEVELS=self._bvh_levels,
+                    ENABLE_DEBUGGING=1,
+                    LEVEL_DEBUG=self._debug_level
+                )
+            )
             glUniform1ui(0, self._num_lines)
             glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 0, self._lines_buffer)
             glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 1, self._bvh_buffer)
             glDispatchCompute(1, 1, 1)
 
-            glUseProgram(_DRAW_BVH_0_PROGRAM.get(DEBUG_LEVEL_BBOXES=int(self._debug_type > 0)))
+            glUseProgram(_DRAW_BVH_0_PROGRAM.get(DEBUG_LEVEL_BBOXES=1))
             glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 0, self._bvh_buffer)
             glBindVertexArray(viewport.get_dummy_vao())
-
-            if self._debug_type == 0:
-                glDrawArrays(GL_TRIANGLES, 0, 64 * 6)
-            elif self._debug_type == 1:
-                glDrawArrays(GL_TRIANGLES, 0, 64 * 6)
-            elif self._debug_type == 2:
-                glDrawArrays(GL_TRIANGLES, 0, 16 * 6)
-            else:
-                glDrawArrays(GL_TRIANGLES, 0, 4 * 6)
+            glDrawArrays(GL_TRIANGLES, 0, (1<<self._debug_level)**2 * 6)
 
 
         glDisable(GL_DEPTH_TEST)
@@ -333,11 +336,21 @@ class Renderer(object):
         glViewport(0, 0, width, height)
 
     def _keypress(self, wnd, key, x, y):
+        # CTRL-R
+        if key == b'\x12':
+            viewport.clear_compiled_shaders()
+            print("RECOMPILIN SHADERS")
         if key == b'd':
-            self._debug_type += 1
-            self._debug_type %= 4
-        elif key == b't':
-            self._tracing_test ^= 1
+            self._debugging ^= 1
+            self._debug_level = 0
+        elif key == b'l':
+            self._debug_level += 1
+            self._debug_level %= (self._bvh_levels + 1)
+        elif key == b'b':
+            self._bvh_levels += 1
+            if self._bvh_levels >= 5:
+                self._bvh_levels = 2
+            self._debug_level %= (self._bvh_levels + 1)
         elif key == b'f':
             self._distance_field ^= 1
         elif key == b'c':

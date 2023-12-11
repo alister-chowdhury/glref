@@ -1,12 +1,19 @@
 #version 460 core
-
-// TODO
-// Rewrite this so its easier to arbitarily
-// change the dim size, 16x16 should also fit
-// inside of the LDS limit
+#extension GL_EXT_control_flow_attributes : require
 
 
-#define BUCKET_SIZE_DIM 8
+/*
+    level count : bucket dims
+              1 : 2x2
+              2 : 4x4
+              3 : 8x8
+              4 : 16x16
+*/
+#ifndef NUM_LEVELS
+#define NUM_LEVELS 3
+#endif // NUM_LEVELS
+
+#define BUCKET_SIZE_DIM (1<<NUM_LEVELS)
 
 layout(local_size_x=BUCKET_SIZE_DIM, local_size_y=BUCKET_SIZE_DIM) in;
 
@@ -18,15 +25,31 @@ layout(local_size_x=BUCKET_SIZE_DIM, local_size_y=BUCKET_SIZE_DIM) in;
 readonly layout(std430, binding = 0) buffer inLines_ { vec4 inLines[]; };
 writeonly layout(std430, binding = 1) buffer outBVH_ { vec4 outBVH[]; };
 
-
-#define MAKE_LINEAR_ID(tid, brickSize) ((tid).y * (brickSize) + (tid).x)
-
-
 #ifdef VULKAN
 layout(binding=2) uniform numLines_ { uint numLines; };
 #else // VULKAN
 layout(location=0) uniform uint numLines;
 #endif // VULKAN
+
+
+// https://gist.github.com/JarkkoPFC/0e4e599320b0cc7ea92df45fb416d79a
+uint encode16_morton2(uint x, uint y)
+{
+  uint res = x | (uint(y) << 16);
+  res = (res | (res<<4)) & 0x0f0f0f0fu;
+  res = (res | (res<<2)) & 0x33333333u;
+  res = (res | (res<<1)) & 0x55555555u;
+  return uint(res | (res>>15)) & 0xffffu;
+}
+
+
+// When accessing shared memory, we use a linear index
+// based upon the thread id, to prevent bank conflicts.
+//
+// When accessing the BVH memory, we use morton encoding
+// to create better cache coherancy. 
+#define MAKE_LINEAR_ID(tid, brickSize)  ((tid).y * (brickSize) + (tid).x)
+#define MAKE_MORTON_ID(tid)             (encode16_morton2((tid).x, (tid).y))
 
 
 vec4 mergeBounds(vec4 a, vec4 b)
@@ -49,7 +72,7 @@ struct BVHNodeEntry
     uint count;
 };
 
-BVHNodeEntry makeTopLevelBVHEntry(uint offset, vec4 bbox, uint count)
+BVHNodeEntry makeBottomLevelBVHEntry(uint offset, vec4 bbox, uint count)
 {
     BVHNodeEntry result;
     result.type = BVH_V2_METADATA_LINE_BUCKET;
@@ -62,8 +85,11 @@ BVHNodeEntry makeTopLevelBVHEntry(uint offset, vec4 bbox, uint count)
 
 BVHNodeEntry writeBVHNode(uint outputOffset,
                           BVHNodeEntry left,
-                          BVHNodeEntry right)
+                          BVHNodeEntry right,
+                          bool canMerge)
 {
+
+#if !ENABLE_DEBUGGING
     // NB: we could avoid writing invalid entries
     // and possibly saving some bandwith
     outBVH[outputOffset] = uintBitsToFloat(uvec4(
@@ -71,12 +97,13 @@ BVHNodeEntry writeBVHNode(uint outputOffset,
     ));
     outBVH[outputOffset + 1] = left.count == 0 ? vec4(0) : left.bbox;
     outBVH[outputOffset + 2] = right.count == 0 ? vec4(0) : right.bbox;
+#endif // !ENABLE_DEBUGGING
 
     // If we didn't do a proper merge, just return which
     // ever value was valid, or return an invalid value
     // if neither were valid. 
-    if(left.count == 0)         { return right; }
-    else if(right.count == 0)   { return left; }
+    if(right.count == 0)        { return left; }
+    else if(left.count == 0)    { return right; }
 
     BVHNodeEntry merged;
     merged.type = BVH_V2_METADATA_BBOX;
@@ -104,10 +131,12 @@ BVHNodeEntry writeBVHLevel(uint outputOffset,
     }
 
     BVHNodeEntry left = writeBVHNode(outputOffset + BVH_V2_NODE_FLOAT4_STRIDE,
-                                     A, B);
+                                     A, B,
+                                     false);
     BVHNodeEntry right = writeBVHNode(outputOffset + BVH_V2_NODE_FLOAT4_STRIDE * 2,
-                                     C, D);
-    return writeBVHNode(outputOffset, left, right);
+                                     C, D,
+                                     false);
+    return writeBVHNode(outputOffset, left, right, true);
 }
 
 
@@ -116,20 +145,109 @@ shared BVHNodeEntry nodeDataSwapA[BUCKET_SIZE_DIM * BUCKET_SIZE_DIM];           
 shared BVHNodeEntry nodeDataSwapB[(BUCKET_SIZE_DIM / 2) * (BUCKET_SIZE_DIM / 2)];   // 448 or 512 bytes
 
 
+// explain etc
 uint getNodeLevelOffset(uint level)
 {
     return ((1u << (level + level)) - 1u) * BVH_V2_NODE_FLOAT4_STRIDE;
 }
 
 
+void fetchNodeDataLDS(uvec4 ids,
+                      uint nodeDataSide,
+                      out BVHNodeEntry A,
+                      out BVHNodeEntry B,
+                      out BVHNodeEntry C,
+                      out BVHNodeEntry D)
+{
+    if((nodeDataSide & 1u) == 0u)
+    {
+        A = nodeDataSwapA[ids.x];
+        B = nodeDataSwapA[ids.y];
+        C = nodeDataSwapA[ids.z];
+        D = nodeDataSwapA[ids.w];
+    }
+    else
+    {
+        A = nodeDataSwapB[ids.x];
+        B = nodeDataSwapB[ids.y];
+        C = nodeDataSwapB[ids.z];
+        D = nodeDataSwapB[ids.w];
+    }
+}
+
+
+void buildNodeTree(uvec2 tid,
+                   uint level,
+                   uint nodeDataSide,
+                   bool writeDebugData)
+{
+    uint inputBucketDim = (1u << (level+1u));
+    uint outputBucketDim = (1u << level);
+    
+    if(all(lessThan(tid, uvec2(outputBucketDim))))
+    {
+        uint localBucketId = MAKE_LINEAR_ID(tid, outputBucketDim);
+        uint Aid = MAKE_LINEAR_ID((tid * 2u + uvec2(0, 0)), inputBucketDim);
+        uint Bid = MAKE_LINEAR_ID((tid * 2u + uvec2(1, 0)), inputBucketDim);
+        uint Cid = MAKE_LINEAR_ID((tid * 2u + uvec2(0, 1)), inputBucketDim);
+        uint Did = MAKE_LINEAR_ID((tid * 2u + uvec2(1, 1)), inputBucketDim);
+
+        BVHNodeEntry A;
+        BVHNodeEntry B;
+        BVHNodeEntry C;
+        BVHNodeEntry D;
+        fetchNodeDataLDS(uvec4(Aid, Bid, Cid, Did),
+                         nodeDataSide,
+                         A, B, C, D);
+
+#if ENABLE_DEBUGGING
+        if(writeDebugData)
+        {
+            // debugging
+            vec4 topLevelBbox = mergeBounds(mergeBounds(A.bbox, B.bbox),
+                                            mergeBounds(C.bbox, D.bbox));
+            if((A.count + B.count + C.count + D.count) == 0)
+            {
+                topLevelBbox = vec4(0);
+            }
+            outBVH[localBucketId] = topLevelBbox;
+            return;
+        }
+#endif // ENABLE_DEBUGGING
+
+        uint levelWriteStart = getNodeLevelOffset(level);
+        uint nodeOffset = MAKE_MORTON_ID(tid);
+        BVHNodeEntry bvhEntry = writeBVHLevel(levelWriteStart + 3u * BVH_V2_NODE_FLOAT4_STRIDE * nodeOffset,
+                                              A, B, C, D);
+
+        if(level != 0u)
+        {
+            if((nodeDataSide & 1u) == 0u)
+            {
+                nodeDataSwapB[localBucketId] = bvhEntry;
+            }
+            else
+            {
+                nodeDataSwapA[localBucketId] = bvhEntry;
+            }            
+        }
+    }
+
+    if(level != 1u)
+    {
+        barrier();
+    }
+}
+
+
 void main()
 {
     uvec2 tid = gl_LocalInvocationID.xy;
-    uint bucketId = MAKE_LINEAR_ID(tid, BUCKET_SIZE_DIM);
-    
+    uint bucketId = MAKE_MORTON_ID(tid);
+
     // We bucket lines based upon where their center is.
     vec4 bucketBbox = vec4(tid, tid + 1u) /
-                      vec2(BUCKET_SIZE_DIM - 1, BUCKET_SIZE_DIM - 1).xyxy;
+                      vec2(BUCKET_SIZE_DIM, BUCKET_SIZE_DIM).xyxy;
 
 
     // This is the final bbox of the current cell, which starts
@@ -166,51 +284,27 @@ void main()
     bucketAllocator[bucketId] = bucketCount;
     barrier();
 
-#if DEBUG_LEVEL == 1
-    // debugging
-    if(bucketCount == 0)
+#if ENABLE_DEBUGGING
+    if(LEVEL_DEBUG == NUM_LEVELS)
     {
-        finalBbox = vec4(0);
+        if(bucketCount == 0)
+        {
+            finalBbox = vec4(0);
+        }
+        outBVH[bucketId] = finalBbox;
+        return;
     }
-    outBVH[bucketId] = finalBbox;
-    return;
-#endif // DEBUG_LEVEL == 1
+#endif // ENABLE_DEBUGGING
 
-    // Next we need to figure out what the offset
-    // this bucket should start writing 
-
-
-    // todo: swap this out for like
-    //  offset = (1 << (level + level)) - 1;    // basically 4*n - 1
-    //  offset *= (3u * BVH_V2_NODE_FLOAT4_STRIDE);
-
-    const uint nodeOffsetLevel0 = 0u;
-    const uint nodeSizeLevel0 = 3u * BVH_V2_NODE_FLOAT4_STRIDE;
-
-    const uint nodeOffsetLevel1 = nodeOffsetLevel0 + nodeSizeLevel0;
-    const uint nodeSizeLevel1 = 4u * nodeSizeLevel0;
-
-    const uint nodeOffsetLevel2 = nodeOffsetLevel1 + nodeSizeLevel1;
-    const uint nodeSizeLevel2 = 4u * nodeSizeLevel1;
-
-    const uint bucketLinesStartOffset = nodeOffsetLevel2 + nodeSizeLevel2;
-
-
-    // // This does work, but its less obvious what ss happening, fixup later
-    // const uint nodeOffsetLevel0 = getNodeLevelOffset(0u);
-    // const uint nodeOffsetLevel1 = getNodeLevelOffset(1u);
-    // const uint nodeOffsetLevel2 = getNodeLevelOffset(2u);
-    // const uint bucketLinesStartOffset = getNodeLevelOffset(3u);
-
-
-    uint bucketWriteOffset = bucketLinesStartOffset;
+    // Write lines after the BVH data
+    uint bucketWriteOffset = getNodeLevelOffset(NUM_LEVELS);
     for(uint id=0; id<bucketId; ++id)
     {
         bucketWriteOffset += bucketAllocator[id];
     }
-    nodeDataSwapA[bucketId] = makeTopLevelBVHEntry(bucketWriteOffset,
-                                                   finalBbox,
-                                                   bucketCount);
+    nodeDataSwapA[bucketId] = makeBottomLevelBVHEntry(bucketWriteOffset,
+                                                      finalBbox,
+                                                      bucketCount);
 
 
     barrier();
@@ -227,81 +321,21 @@ void main()
         }
     }
 
-    if(all(lessThan(tid, uvec2(BUCKET_SIZE_DIM/2))))
+    uint nodeDataSide = 0u;
+
+    [[unroll]]
+    for(int level=(NUM_LEVELS-1); level >= 0; --level, ++nodeDataSide)
     {
-        uint localBucketId = MAKE_LINEAR_ID(tid, BUCKET_SIZE_DIM/2);
-        uint Aid = MAKE_LINEAR_ID((tid * 2u + uvec2(0, 0)), BUCKET_SIZE_DIM);
-        uint Bid = MAKE_LINEAR_ID((tid * 2u + uvec2(1, 0)), BUCKET_SIZE_DIM);
-        uint Cid = MAKE_LINEAR_ID((tid * 2u + uvec2(0, 1)), BUCKET_SIZE_DIM);
-        uint Did = MAKE_LINEAR_ID((tid * 2u + uvec2(1, 1)), BUCKET_SIZE_DIM);
+        bool debugLevel = false;
 
-        BVHNodeEntry A = nodeDataSwapA[Aid];
-        BVHNodeEntry B = nodeDataSwapA[Bid];
-        BVHNodeEntry C = nodeDataSwapA[Cid];
-        BVHNodeEntry D = nodeDataSwapA[Did];
+#if ENABLE_DEBUGGING
+        debugLevel = (LEVEL_DEBUG == level);
+#endif // ENABLE_DEBUGGING
 
-#if DEBUG_LEVEL == 2
-        // debugging
-        vec4 topLevelBbox = mergeBounds(mergeBounds(A.bbox, B.bbox),
-                                        mergeBounds(C.bbox, D.bbox));
-        if((A.count + B.count + C.count + D.count) == 0)
-        {
-            topLevelBbox = vec4(0);
-        }
-        outBVH[localBucketId] = topLevelBbox;
-        return;
-#endif // DEBUG_LEVEL == 2
+        buildNodeTree(tid, uint(level), nodeDataSide, debugLevel);
 
-        nodeDataSwapB[localBucketId] = writeBVHLevel(nodeOffsetLevel2 + 3 * BVH_V2_NODE_FLOAT4_STRIDE * localBucketId,
-                                                     A, B, C, D);
+#if ENABLE_DEBUGGING
+        if(debugLevel) { break; }
+#endif // ENABLE_DEBUGGING
     }
-    barrier();
-
-    if(all(lessThan(tid, uvec2(BUCKET_SIZE_DIM/4))))
-    {
-        uint localBucketId = MAKE_LINEAR_ID(tid, BUCKET_SIZE_DIM/4);
-        uint Aid = MAKE_LINEAR_ID((tid * 2u + uvec2(0, 0)), BUCKET_SIZE_DIM/2);
-        uint Bid = MAKE_LINEAR_ID((tid * 2u + uvec2(1, 0)), BUCKET_SIZE_DIM/2);
-        uint Cid = MAKE_LINEAR_ID((tid * 2u + uvec2(0, 1)), BUCKET_SIZE_DIM/2);
-        uint Did = MAKE_LINEAR_ID((tid * 2u + uvec2(1, 1)), BUCKET_SIZE_DIM/2);
-
-        BVHNodeEntry A = nodeDataSwapB[Aid];
-        BVHNodeEntry B = nodeDataSwapB[Bid];
-        BVHNodeEntry C = nodeDataSwapB[Cid];
-        BVHNodeEntry D = nodeDataSwapB[Did];
-
-#if DEBUG_LEVEL == 3
-        // debugging
-        vec4 topLevelBbox = mergeBounds(mergeBounds(A.bbox, B.bbox),
-                                        mergeBounds(C.bbox, D.bbox));
-        if((A.count + B.count + C.count + D.count) == 0)
-        {
-            topLevelBbox = vec4(0);
-        }
-        outBVH[localBucketId] = topLevelBbox;
-        return;
-#endif // DEBUG_LEVEL == 3
-
-        nodeDataSwapA[localBucketId] = writeBVHLevel(nodeOffsetLevel1 + 3 * BVH_V2_NODE_FLOAT4_STRIDE * localBucketId,
-                                                     A, B, C, D);
-    }
-    barrier();
-
-    if(all(lessThan(tid, uvec2(BUCKET_SIZE_DIM/8))))
-    {
-        uint localBucketId = MAKE_LINEAR_ID(tid, BUCKET_SIZE_DIM/8);
-        uint Aid = MAKE_LINEAR_ID((tid * 2u + uvec2(0, 0)), BUCKET_SIZE_DIM/4);
-        uint Bid = MAKE_LINEAR_ID((tid * 2u + uvec2(1, 0)), BUCKET_SIZE_DIM/4);
-        uint Cid = MAKE_LINEAR_ID((tid * 2u + uvec2(0, 1)), BUCKET_SIZE_DIM/4);
-        uint Did = MAKE_LINEAR_ID((tid * 2u + uvec2(1, 1)), BUCKET_SIZE_DIM/4);
-
-        BVHNodeEntry A = nodeDataSwapA[Aid];
-        BVHNodeEntry B = nodeDataSwapA[Bid];
-        BVHNodeEntry C = nodeDataSwapA[Cid];
-        BVHNodeEntry D = nodeDataSwapA[Did];
-
-        writeBVHLevel(nodeOffsetLevel0 + 3 * BVH_V2_NODE_FLOAT4_STRIDE * localBucketId,
-                      A, B, C, D);
-    }
-
 }
