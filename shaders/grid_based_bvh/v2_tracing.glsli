@@ -2,8 +2,7 @@
 #define LINE_BVH_V2_TRACING_GLSLI
 
 
-// Should be like log2(num_lines) + 1 for maximum occupancy
-// assuming a mostly perfect binary tree.
+// Should be like log2(num_buckets) + 1 for maximum occupancy
 #ifndef LINE_BVH_V2_STACK_SIZE
 #define LINE_BVH_V2_STACK_SIZE 16
 #endif // LINE_BVH_V2_STACK_SIZE
@@ -55,8 +54,8 @@ void lineBvhV2EvalLineBucket(vec2 ro,
                              bool stopOnFirstHit,
                              inout LineBvhV2Result result)
 {
-    uint count = packedOffsetCount >> 24u;
-    uint offset = packedOffsetCount & 0x00ffffffu;
+    uint count = packedOffsetCount >> 22u;
+    uint offset = packedOffsetCount & 0x3fffffu;
     uint offsetEnd = offset + count;
 
     if(!stopOnFirstHit)
@@ -248,15 +247,7 @@ LineBvhV2Result traceLineBvhV2(vec2 ro, vec2 rd, float maxDist, bool stopOnFirst
         }
     }
 
-    if(result.hitLineId != 0xffffffffu)
-    {
-        result.hit = true;
-        result.hitLineId -= 189u;
-    }
-    else
-    {
-        result.hit = false;
-    }
+    result.hit = (result.hitLineId != 0xffffffffu);
 
     return result;
 }
@@ -269,7 +260,6 @@ bool findNearestLineBvhV2EvalEntry(vec2 ro,
                                    inout float dist,
                                    inout int idx)
 {
-    
     // distance to bbox
     {
         vec2 bboxMin = data.xy;
@@ -294,8 +284,8 @@ bool findNearestLineBvhV2EvalEntry(vec2 ro,
     if(floatBitsToUint(metadata).x == LINE_BVH_V2_LINE_BUCKET_TYPE)
     {
         uint packedOffsetCount = floatBitsToUint(metadata).y;
-        uint count = packedOffsetCount >> 24u;
-        uint offset = packedOffsetCount & 0x00ffffffu;
+        uint count = packedOffsetCount >> 22u;
+        uint offset = packedOffsetCount & 0x3fffffu;
         uint offsetEnd = offset + count;
 
         result.numLineIntersections += int(count);
@@ -402,11 +392,6 @@ FindNearestLineBvhV2Result findNearestLineBvhV2(vec2 ro, float maxDist)
         {
             done = true;
         }
-    }
-
-    if(result.hitLineId != 0xffffffffu)
-    {
-        result.hitLineId -= 189u;
     }
 
     return result;

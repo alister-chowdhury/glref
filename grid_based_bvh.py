@@ -350,6 +350,7 @@ class Renderer(object):
             self._bvh_levels += 1
             if self._bvh_levels >= 5:
                 self._bvh_levels = 2
+            # print(self._bvh_levels)
             self._debug_level %= (self._bvh_levels + 1)
         elif key == b'f':
             self._distance_field ^= 1

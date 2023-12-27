@@ -15,12 +15,15 @@
 
 #define BUCKET_SIZE_DIM (1<<NUM_LEVELS)
 
-layout(local_size_x=BUCKET_SIZE_DIM, local_size_y=BUCKET_SIZE_DIM) in;
-
+#ifndef ALLOW_MERGING
+#define ALLOW_MERGING 1
+#endif // ALLOW_MERGING
 
 #define BVH_V2_METADATA_BBOX            0
 #define BVH_V2_METADATA_LINE_BUCKET     1
 #define BVH_V2_NODE_FLOAT4_STRIDE       3
+
+layout(local_size_x=BUCKET_SIZE_DIM, local_size_y=BUCKET_SIZE_DIM) in;
 
 readonly layout(std430, binding = 0) buffer inLines_ { vec4 inLines[]; };
 writeonly layout(std430, binding = 1) buffer outBVH_ { vec4 outBVH[]; };
@@ -47,7 +50,8 @@ uint encode16_morton2(uint x, uint y)
 // based upon the thread id, to prevent bank conflicts.
 //
 // When accessing the BVH memory, we use morton encoding
-// to create better cache coherancy. 
+// to create better cache coherancy and to allow us to
+// merge small line buckets togehter.
 #define MAKE_LINEAR_ID(tid, brickSize)  ((tid).y * (brickSize) + (tid).x)
 #define MAKE_MORTON_ID(tid)             (encode16_morton2((tid).x, (tid).y))
 
@@ -76,7 +80,7 @@ BVHNodeEntry makeBottomLevelBVHEntry(uint offset, vec4 bbox, uint count)
 {
     BVHNodeEntry result;
     result.type = BVH_V2_METADATA_LINE_BUCKET;
-    result.offset = offset | (count << 24);
+    result.offset = offset | (count << 22);
     result.bbox = bbox;
     result.count = count;
     return result;
@@ -85,8 +89,7 @@ BVHNodeEntry makeBottomLevelBVHEntry(uint offset, vec4 bbox, uint count)
 
 BVHNodeEntry writeBVHNode(uint outputOffset,
                           BVHNodeEntry left,
-                          BVHNodeEntry right,
-                          bool canMerge)
+                          BVHNodeEntry right)
 {
 
 #if !ENABLE_DEBUGGING
@@ -113,30 +116,58 @@ BVHNodeEntry writeBVHNode(uint outputOffset,
     return merged;
 }
 
+
 BVHNodeEntry writeBVHLevel(uint outputOffset,
                            BVHNodeEntry A, BVHNodeEntry B,
                            BVHNodeEntry C, BVHNodeEntry D)
 {
-    // Pick either [[A B] | [C D]]
-    //          or [[A C] | [B D]]
-    float ABarea = boundsArea(mergeBounds(A.bbox, B.bbox));
-    float ACarea = boundsArea(mergeBounds(A.bbox, C.bbox));
-    float CDarea = boundsArea(mergeBounds(C.bbox, D.bbox));
-    float BDarea = boundsArea(mergeBounds(B.bbox, D.bbox));
-    if((ABarea + CDarea) > (ACarea + BDarea))
+
+    bool done = false;
+    BVHNodeEntry left;
+    BVHNodeEntry right;
+
+#if ALLOW_MERGING
+    const uint maxLinesToMerge = 16u;
+
+    uint mergedCount = A.count + B.count + C.count + D.count;
+    bool hasSmallCount = mergedCount <= maxLinesToMerge;
+    bool allBuckets = all(equal(uvec4(A.type, B.type, C.type, D.type),
+                                uvec4(BVH_V2_METADATA_LINE_BUCKET)));
+
+    if(hasSmallCount && allBuckets)
     {
-        BVHNodeEntry tmp = B;
-        B = C;
-        C = tmp;
+        done = true;
+        uint offset = A.offset & 0x3fffffu;
+        vec4 mergedBbox = mergeBounds(mergeBounds(A.bbox, B.bbox),
+                                      mergeBounds(C.bbox, D.bbox));
+        left = makeBottomLevelBVHEntry(offset, mergedBbox, mergedCount);
+        right = makeBottomLevelBVHEntry(0, vec4(1.0, 1.0, -1.0, -1.0), 0);
     }
 
-    BVHNodeEntry left = writeBVHNode(outputOffset + BVH_V2_NODE_FLOAT4_STRIDE,
-                                     A, B,
-                                     false);
-    BVHNodeEntry right = writeBVHNode(outputOffset + BVH_V2_NODE_FLOAT4_STRIDE * 2,
-                                     C, D,
-                                     false);
-    return writeBVHNode(outputOffset, left, right, true);
+#endif // ALLOW_MERGING
+
+    if(!done)
+    {
+        // Pick either [[A B] | [C D]]
+        //          or [[A C] | [B D]]
+        float ABarea = boundsArea(mergeBounds(A.bbox, B.bbox));
+        float ACarea = boundsArea(mergeBounds(A.bbox, C.bbox));
+        float CDarea = boundsArea(mergeBounds(C.bbox, D.bbox));
+        float BDarea = boundsArea(mergeBounds(B.bbox, D.bbox));
+        if((ABarea + CDarea) > (ACarea + BDarea))
+        {
+            BVHNodeEntry tmp = B;
+            B = C;
+            C = tmp;
+        }
+
+        left = writeBVHNode(outputOffset + BVH_V2_NODE_FLOAT4_STRIDE,
+                            A, B);
+        right = writeBVHNode(outputOffset + BVH_V2_NODE_FLOAT4_STRIDE * 2,
+                             C, D);
+    }
+    
+    return writeBVHNode(outputOffset, left, right);
 }
 
 
@@ -302,9 +333,11 @@ void main()
     {
         bucketWriteOffset += bucketAllocator[id];
     }
-    nodeDataSwapA[bucketId] = makeBottomLevelBVHEntry(bucketWriteOffset,
-                                                      finalBbox,
-                                                      bucketCount);
+
+    uint ldsBucketId = MAKE_LINEAR_ID(tid, (1u << NUM_LEVELS));
+    nodeDataSwapA[ldsBucketId] = makeBottomLevelBVHEntry(bucketWriteOffset,
+                                                         finalBbox,
+                                                         bucketCount);
 
 
     barrier();
