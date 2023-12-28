@@ -50,14 +50,12 @@ struct FindNearestLineBvhV2Result
 
 
 void lineBvhV2EvalLineBucket(vec2 ro,
-                             uint packedOffsetCount,
+                             uint offset,
+                             uint count,
                              bool stopOnFirstHit,
                              inout LineBvhV2Result result)
 {
-    uint count = packedOffsetCount >> 22u;
-    uint offset = packedOffsetCount & 0x3fffffu;
     uint offsetEnd = offset + count;
-
     if(!stopOnFirstHit)
     {
         result.numLineIntersections += int(count);
@@ -139,19 +137,20 @@ bool lineBvhV2EvalEntry(vec2 ro,
                         inout float dist,
                         inout int idx)
 {
-
     if(lineBvhV2RayBboxTest(ro, invRd, bbox, result, dist))
     {
-        if(floatBitsToUint(metadata).x == LINE_BVH_V2_LINE_BUCKET_TYPE)
+        uvec2 metadataBits = floatBitsToUint(metadata);
+        if(metadataBits.x != LINE_BVH_V2_BBOX_TYPE)
         {
             lineBvhV2EvalLineBucket(ro,
-                                    floatBitsToUint(metadata).y,
+                                    metadataBits.y,
+                                    metadataBits.x >> 1,
                                     stopOnFirstHit,
                                     result);
         }
         else
         {
-            idx = floatBitsToInt(metadata).y;
+            idx = floatBitsToInt(metadata.y);
             return true;
         }
     }
@@ -260,6 +259,8 @@ bool findNearestLineBvhV2EvalEntry(vec2 ro,
                                    inout float dist,
                                    inout int idx)
 {
+    uvec2 metadataBits = floatBitsToUint(metadata);
+
     // distance to bbox
     {
         vec2 bboxMin = data.xy;
@@ -281,11 +282,10 @@ bool findNearestLineBvhV2EvalEntry(vec2 ro,
         }
     }
 
-    if(floatBitsToUint(metadata).x == LINE_BVH_V2_LINE_BUCKET_TYPE)
+    if(metadataBits.x != LINE_BVH_V2_BBOX_TYPE)
     {
-        uint packedOffsetCount = floatBitsToUint(metadata).y;
-        uint count = packedOffsetCount >> 22u;
-        uint offset = packedOffsetCount & 0x3fffffu;
+        uint count = metadataBits.x >> 1;
+        uint offset = metadataBits.y;
         uint offsetEnd = offset + count;
 
         result.numLineIntersections += int(count);
@@ -304,7 +304,7 @@ bool findNearestLineBvhV2EvalEntry(vec2 ro,
 
             if(nearestDistSq < result.hitDistSq)
             {
-                result.hitLineId = floatBitsToUint(metadata.y);
+                result.hitLineId = metadataBits.y;
                 result.line = line;
                 result.hitDistSq = nearestDistSq;
             }

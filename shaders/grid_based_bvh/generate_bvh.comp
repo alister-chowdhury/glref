@@ -79,8 +79,8 @@ struct BVHNodeEntry
 BVHNodeEntry makeBottomLevelBVHEntry(uint offset, vec4 bbox, uint count)
 {
     BVHNodeEntry result;
-    result.type = BVH_V2_METADATA_LINE_BUCKET;
-    result.offset = offset | (count << 22);
+    result.type = BVH_V2_METADATA_LINE_BUCKET | (count << 1);
+    result.offset = offset;
     result.bbox = bbox;
     result.count = count;
     return result;
@@ -131,13 +131,13 @@ BVHNodeEntry writeBVHLevel(uint outputOffset,
 
     uint mergedCount = A.count + B.count + C.count + D.count;
     bool hasSmallCount = mergedCount <= maxLinesToMerge;
-    bool allBuckets = all(equal(uvec4(A.type, B.type, C.type, D.type),
+    bool allBuckets = all(equal(uvec4(A.type, B.type, C.type, D.type) & 1u,
                                 uvec4(BVH_V2_METADATA_LINE_BUCKET)));
 
     if(hasSmallCount && allBuckets)
     {
         done = true;
-        uint offset = A.offset & 0x3fffffu;
+        uint offset = A.offset;
         vec4 mergedBbox = mergeBounds(mergeBounds(A.bbox, B.bbox),
                                       mergeBounds(C.bbox, D.bbox));
         left = makeBottomLevelBVHEntry(offset, mergedBbox, mergedCount);
@@ -176,10 +176,11 @@ shared BVHNodeEntry nodeDataSwapA[BUCKET_SIZE_DIM * BUCKET_SIZE_DIM];           
 shared BVHNodeEntry nodeDataSwapB[(BUCKET_SIZE_DIM / 2) * (BUCKET_SIZE_DIM / 2)];   // 448 or 512 bytes
 
 
-// explain etc
 uint getNodeLevelOffset(uint level)
 {
-    return ((1u << (level + level)) - 1u) * BVH_V2_NODE_FLOAT4_STRIDE;
+    // ((2^level)^2 - 1) nodes
+    return ((1u << (level + level)) - 1u)
+            * BVH_V2_NODE_FLOAT4_STRIDE;
 }
 
 
@@ -264,7 +265,7 @@ void buildNodeTree(uvec2 tid,
         }
     }
 
-    if(level != 1u)
+    if(level != 0u)
     {
         barrier();
     }
