@@ -28,11 +28,19 @@ layout(local_size_x=BUCKET_SIZE_DIM, local_size_y=BUCKET_SIZE_DIM) in;
 readonly layout(std430, binding = 0) buffer inLines_ { vec4 inLines[]; };
 writeonly layout(std430, binding = 1) buffer outBVH_ { vec4 outBVH[]; };
 
+#ifndef NUM_LINES_USE_UBO
 #ifdef VULKAN
+#define NUM_LINES_USE_UBO 1
+#else
+#define NUM_LINES_USE_UBO 0
+#endif
+#endif // NUM_LINES_USE_UBO
+
+#if NUM_LINES_USE_UBO
 layout(binding=2) uniform numLines_ { uint numLines; };
-#else // VULKAN
+#else // NUM_LINES_USE_UBO
 layout(location=0) uniform uint numLines;
-#endif // VULKAN
+#endif // NUM_LINES_USE_UBO
 
 
 // https://gist.github.com/JarkkoPFC/0e4e599320b0cc7ea92df45fb416d79a

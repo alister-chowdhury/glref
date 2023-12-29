@@ -15,6 +15,8 @@ _SHADER_DIR = os.path.abspath(
     os.path.join(__file__, "..", "shaders")
 )
 
+_BVH_SHADER_DIR = os.path.join(_SHADER_DIR, "grid_based_bvh")
+
 _DRAW_FULL_SCREEN_PATH = os.path.join(
     _SHADER_DIR, "draw_full_screen.vert"
 )
@@ -58,9 +60,27 @@ _DEBUG_TEST_BACKGROUND_NORMALS_PROGRAM = viewport.make_permutation_program(
     GL_FRAGMENT_SHADER = gpu_pixel_game_lib.DEBUG_TEST_BACKGROUND_NORMALS_FRAG
 )
 
+_GEN_MAP_LINES_COMP_PROGRAM = viewport.make_permutation_program(
+    _DEBUGGING,
+    GL_COMPUTE_SHADER = gpu_pixel_game_lib.GEN_MAP_LINES_COMP
+)
+
+_GENERATE_BVH_PROGRAM = viewport.make_permutation_program(
+    _DEBUGGING,
+    GL_COMPUTE_SHADER = os.path.join(_BVH_SHADER_DIR, "generate_bvh.comp")
+)
+
+_DEBUG_DRAW_LINES_PROGRAM = viewport.make_permutation_program(
+    _DEBUGGING,
+    GL_VERTEX_SHADER = gpu_pixel_game_lib.DEBUG_DRAW_LINES_VERT,
+    GL_FRAGMENT_SHADER = gpu_pixel_game_lib.DEBUG_DRAW_LINES_FRAG
+)
+
+
 LEVEL_TILES_X = 128
 LEVEL_TILES_Y = 128
-
+MAX_LINES = 256
+BVH_NUM_LEVELS = 3
 
 class Renderer(object):
 
@@ -79,6 +99,7 @@ class Renderer(object):
         self._n = -1
         self._vis_pf_level = 0
         self._vis_pf_room = 0
+        self._draw_lines = 1
         self._mouse_uv = (0.5, 0.5)
 
     def run(self):
@@ -216,6 +237,24 @@ class Renderer(object):
             GL_UNSIGNED_INT,
             numpy.array([0, 0], dtype=numpy.uint32).tobytes()
         )
+        
+        def ubo_align_size(x):
+            return x + (-x & 15)
+
+        self._line_buffers_ptr = (ctypes.c_int * 3)()
+        glCreateBuffers(3, self._line_buffers_ptr)
+
+        self._lines_buffer = self._line_buffers_ptr[0]
+        self._num_lines_buffer = self._line_buffers_ptr[1]
+        glNamedBufferStorage(self._lines_buffer, MAX_LINES * 16, None, 0)
+        glNamedBufferStorage(self._num_lines_buffer, ubo_align_size(4), None, 0)
+
+        self._bvh_buffer = self._line_buffers_ptr[2]
+        bvh_node_float4_size = 3
+        bvh_grid_size = (1 << BVH_NUM_LEVELS)
+        bvh_num_nodes = (bvh_grid_size * bvh_grid_size - 1)
+        bvh_size_float4 = bvh_num_nodes * bvh_node_float4_size + MAX_LINES
+        glNamedBufferStorage(self._bvh_buffer, bvh_size_float4 * 16, None, 0)
 
         glViewport(0, 0, wnd.width, wnd.height)
 
@@ -269,15 +308,43 @@ class Renderer(object):
             glDrawArrays(GL_TRIANGLES, 0, 64 * 64 * 6)
         glViewport(0, 0, wnd.width, wnd.height)
 
+        # Generate visibility lines
+        glUseProgram(_GEN_MAP_LINES_COMP_PROGRAM.get())
+        glBindBufferBase(GL_UNIFORM_BUFFER, 0, self._global_parameters)
+        glBindImageTexture(1, self._map_atlas, 0, False, 0, GL_READ_ONLY, GL_R32UI)
+        glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 2, self._num_lines_buffer)
+        glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 3, self._lines_buffer)
+        glDispatchCompute(1, 1, 1)
+        glMemoryBarrier(GL_UNIFORM_BARRIER_BIT | GL_SHADER_STORAGE_BARRIER_BIT)
+ 
+        # Generate BVH
+        glUseProgram(_GENERATE_BVH_PROGRAM.get(NUM_LINES_USE_UBO=1, NUM_LEVELS=BVH_NUM_LEVELS))
+        glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 0, self._lines_buffer)
+        glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 1, self._bvh_buffer)
+        glBindBufferBase(GL_UNIFORM_BUFFER, 2, self._num_lines_buffer)
+        glDispatchCompute(1, 1, 1)
 
-        glUseProgram(_DEBUG_TEST_BACKGROUND_NORMALS_PROGRAM.get(VS_OUTPUT_UV=0))
+        glMemoryBarrier(GL_SHADER_STORAGE_BARRIER_BIT)
+
+        glUseProgram(_DEBUG_TEST_BACKGROUND_NORMALS_PROGRAM.get(
+            VS_OUTPUT_UV=0,
+            ENABLE_SHADOW_CASTING=1
+        ))
         glBindBufferBase(GL_UNIFORM_BUFFER, 0, self._global_parameters)
         glBindTextureUnit(1, self._active_background_map_base.texture)
         glBindTextureUnit(2, self._active_background_map_norm.texture)
+        glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 3, self._bvh_buffer)
         glUniform2f(0, self._mouse_uv[0], 1 - self._mouse_uv[1])
         glDrawArrays(GL_TRIANGLES, 0, 3)
 
-        # self._active_background_map.blit_to_back(wnd.width, wnd.height)
+        # Debug draw lines
+        if self._draw_lines != 0:
+            glUseProgram(_DEBUG_DRAW_LINES_PROGRAM.one())
+            glBindBufferBase(GL_UNIFORM_BUFFER, 0, self._global_parameters)
+            glBindBufferBase(GL_UNIFORM_BUFFER, 1, self._num_lines_buffer)
+            glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 2, self._lines_buffer)
+            glDrawArrays(GL_LINES, 0, MAX_LINES * 2)
+
 
         wnd.redraw()
 
@@ -291,6 +358,13 @@ class Renderer(object):
         if key == b'\x12':
             viewport.clear_compiled_shaders()
             print("RECOMPILIN SHADERS")
+            wnd.redraw()
+            return
+
+        elif key == b'x':
+            self._draw_lines ^= 1
+            wnd.redraw()
+            return
 
         elif key == b'l':
             self._vis_pf_level = (self._vis_pf_level + 1) & 7

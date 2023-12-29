@@ -3,6 +3,12 @@
 #include "../common.glsli"
 #include "../map_atlas_common.glsli"
 
+
+#define LINE_BVH_V2_STACK_SIZE 9
+#define LINE_BVH_V2_BINDING 3
+#include "../../../shaders/grid_based_bvh/v2_tracing.glsli"
+
+
 layout(set=0, binding = 0) uniform GlobalParameters_
 {
     GlobalParameters globals;
@@ -29,6 +35,22 @@ void main()
     MapAtlasLevelInfo atlasInfo = getLevelAtlasInfo(level);
     float levelToScreenScale = float(max(atlasInfo.size.x, atlasInfo.size.y)) / 64.0;
 
+
+    float shadow = 1.0;
+
+#if ENABLE_SHADOW_CASTING
+    {
+        vec2 targetUV = lightSource;
+        vec2 fromTarget = uv - targetUV;
+        float dist = length(fromTarget);
+        LineBvhV2Result hit = traceLineBvhV2(targetUV, fromTarget / dist, dist, true);
+        if(hit.hit)
+        {
+            shadow = 0;
+        }
+    }
+#endif // ENABLE_SHADOW_CASTING
+
     vec2 scaledUv = uv * levelToScreenScale;
 
     vec3 base = texture(baseTexture, scaledUv).xyz;
@@ -45,9 +67,11 @@ void main()
 
     vec3 L = normalize(dL);
     float damp = evaluatePointLightAttenuation(length(dL), 5);
-    damp *=4;
+    damp *= 4;
     damp = max(0, min(1, damp));
-    outCol = vec4(max(0, min(1, dot(norm, L))) * base * damp, 1);
+
+
+    outCol = vec4(max(0, min(1, dot(norm, L))) * base * damp * shadow, 1);
 
     // outCol.xyz = base;
     // outCol.xyz = L;

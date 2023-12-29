@@ -12,10 +12,10 @@ _OLD_SHADER_DIR = os.path.abspath(
 
 
 
-GENERATE_MAP_LINES_COMP = os.path.join(_OLD_SHADER_DIR, "generate_map_lines.comp")
+GENERATE_MAP_LINES_COMP__OLD = os.path.join(_OLD_SHADER_DIR, "generate_map_lines.comp")
 
-DRAW_LINES_DEBUG_VERT = os.path.join(_OLD_SHADER_DIR, "draw_lines_debug.vert")
-DRAW_LINES_DEBUG_FRAG = os.path.join(_OLD_SHADER_DIR, "draw_lines_debug.frag")
+DRAW_LINES_DEBUG_VERT__OLD = os.path.join(_OLD_SHADER_DIR, "draw_lines_debug.vert")
+DRAW_LINES_DEBUG_FRAG__OLD = os.path.join(_OLD_SHADER_DIR, "draw_lines_debug.frag")
 DRAW_BSP_MAP_DEBUG_FRAG = os.path.join(_OLD_SHADER_DIR, "draw_bsp_map_debug.frag")
 
 DRAW_BVH_DEBUG_VERT = os.path.join(_OLD_SHADER_DIR, "draw_bvh_debug.vert")
@@ -36,3 +36,7 @@ DEBUG_VIS_PATHFINDING_DIRECTIONS_FRAG = os.path.join(_SHADER_DIR, "initlevels", 
 RENDER_MAP_BACKGROUND_VERT = os.path.join(_SHADER_DIR, "load_map", "render_background.vert")
 RENDER_MAP_BACKGROUND_FRAG = os.path.join(_SHADER_DIR, "load_map", "render_background.frag")
 DEBUG_TEST_BACKGROUND_NORMALS_FRAG = os.path.join(_SHADER_DIR, "load_map", "debug_test_background_normals.frag")
+GEN_MAP_LINES_COMP = os.path.join(_SHADER_DIR, "load_map", "gen_map_lines.comp")
+
+DEBUG_DRAW_LINES_VERT = os.path.join(_SHADER_DIR, "load_map", "debug_draw_lines.vert")
+DEBUG_DRAW_LINES_FRAG = os.path.join(_SHADER_DIR, "load_map", "debug_draw_lines.frag")
