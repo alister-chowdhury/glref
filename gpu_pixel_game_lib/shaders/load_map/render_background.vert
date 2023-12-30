@@ -18,6 +18,7 @@ readonly layout(binding=1, r32ui)    uniform uimage2D mapAtlas;
 readonly layout(binding=2)           buffer assetAtlasBuffer_ { uvec4 assetAtlasBuffer[];};
 
 layout(location=0) out vec3 pixelCoordAndHeight;
+layout(location=1) out vec2 uv;
 
 bool sampleCoord(ivec2 localCoord, MapAtlasLevelInfo atlasInfo)
 {
@@ -38,22 +39,23 @@ void main()
     int pixelId = gl_VertexID / 6;
     ivec2 levelCoord = ivec2(pixelId % 64, pixelId / 64);
     int vertexId = triangleToQuadVertexIdZ(gl_VertexID % 6);
-    vec2 uv = vec2((vertexId & 1), (vertexId >> 1));
-    gl_Position = vec4((vec2(levelCoord) + uv) * (1.0 / 64.0) * 2.0 - 1.0,
+    vec2 localUv = vec2((vertexId & 1), (vertexId >> 1));
+    vec2 backBufferUv = (vec2(levelCoord) + localUv) * (1.0 / 64.0);
+    gl_Position = vec4(backBufferUv * 2.0 - 1.0,
                        0.0,
                        1.0);
 
     uint level = globals.currentLevel;
     MapAtlasLevelInfo atlasInfo = getLevelAtlasInfo(level);
 
-    bool cellVisible = sampleCoord(levelCoord, atlasInfo);
-    bool belowCellVisible = sampleCoord(levelCoord - ivec2(0, 1), atlasInfo);
-    
+    float levelToScreenScale = float(max(atlasInfo.size.x, atlasInfo.size.y)) / 64.0;
+    uv = (backBufferUv + vec2(0, 0.5/64.)) / levelToScreenScale;
+
+    bool cellVisible = sampleCoord(levelCoord, atlasInfo);    
 
     uint assetId = ASSET_ATLAS_ID_EMPTY;
     vec2 heights = vec2(0.0);
 
-    if(cellVisible || belowCellVisible)
     {
         if(cellVisible)
         {

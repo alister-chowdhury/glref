@@ -6,7 +6,8 @@
 
 #define LINE_BVH_V2_STACK_SIZE 9
 #define LINE_BVH_V2_BINDING 3
-#include "../../../shaders/grid_based_bvh/v2_tracing.glsli"
+// #include "../../../shaders/grid_based_bvh/v2_tracing.glsli"
+#include "../v2_tracing.glsli"
 
 
 layout(set=0, binding = 0) uniform GlobalParameters_

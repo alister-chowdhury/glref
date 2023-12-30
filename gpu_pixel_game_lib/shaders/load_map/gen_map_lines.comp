@@ -1,11 +1,22 @@
 #version 460 core
 
+// TODO
+// CHANGE THIS TO BE IN RENDER BUFFER SPACE
+// SO DISTANCES N STUFF ARE GLOBAL, RATHER THAN
+// RELATIVE TO THE MAP SIZE!
+
+
 #include "../common.glsli"
 #include "../map_atlas_common.glsli"
 
 
-#define THREAD_SIZE     MAX_LEVEL_DIM
-#define INVALID_OFFSET  -0x7ffffff
+#define THREAD_SIZE         MAX_LEVEL_DIM
+#define INVALID_OFFSET      -0x7ffffff
+#define UV_OFFSET_BASE      (0.125)
+#define UV_OFFSET_INVBASE   (1.-0.125)
+#define UV_OFFSET_AMOUNT    (0.25 * 1.5)
+#define UV_Y_OFFSET         (0.25 * 1.5)
+
 
 layout(local_size_x=THREAD_SIZE) in;
 
@@ -38,18 +49,19 @@ bool sampleCoord(ivec2 localCoord, MapAtlasLevelInfo atlasInfo)
 }
 
 
-uint evaluateX(uint tid,
-               uint offset,
-               MapAtlasLevelInfo atlasInfo,
-               bool dryRun)
+uint evaluateHorizontal(uint tid,
+                        uint offset,
+                        MapAtlasLevelInfo atlasInfo,
+                        bool dryRun)
 {
     float invWidth = atlasInfo.inverseSize.x;
     float invHeight = atlasInfo.inverseSize.y;
 
     for(int y=int(tid); y < atlasInfo.size.y; y+=THREAD_SIZE)
     {
-        float v = 0;
         int lineStart = INVALID_OFFSET;
+        float u0Offset = 0;
+        float v = 0;
 
         for(int x=0; x < atlasInfo.size.x; ++x)
         {
@@ -60,15 +72,16 @@ uint evaluateX(uint tid,
             {
                 if(lineStart == INVALID_OFFSET)
                 {
-                    lineStart = x;
+                    float voffset = (downVisible ? UV_OFFSET_AMOUNT : -UV_OFFSET_AMOUNT);
+                    v = (float(y) + voffset + UV_Y_OFFSET) * invHeight;
 
-                    // Extend the end to handle wall segments
-                    int yOffset = y;
-                    if(downVisible)
-                    {
-                        ++yOffset;
-                    }
-                    v = float(yOffset) * invHeight;
+                    lineStart = x;
+                    
+                    bool leftVisible = sampleCoord(ivec2(x-1, y), atlasInfo);
+                    u0Offset = (leftVisible ? UV_OFFSET_AMOUNT : -UV_OFFSET_AMOUNT)
+                                + UV_OFFSET_BASE
+                                ;
+
                 }
             }
             else if(lineStart != INVALID_OFFSET)
@@ -77,9 +90,17 @@ uint evaluateX(uint tid,
                 if(!dryRun)
                 {
                     uint lineEnd = x;
-                    outLines[writeId] = vec4(float(lineStart) * invWidth,
+
+                    float u0 = (float(lineStart) + u0Offset) * invWidth;
+
+                    float u1Offset = (middleVisible ? -UV_OFFSET_AMOUNT : UV_OFFSET_AMOUNT)
+                                    - UV_OFFSET_BASE
+                                    ;
+                    float u1 = (float(lineEnd) + u1Offset) * invWidth;
+
+                    outLines[writeId] = vec4(u0,
                                              v,
-                                             float(lineEnd) * invWidth,
+                                             u1,
                                              v);
                 }
                 lineStart = INVALID_OFFSET;
@@ -91,20 +112,20 @@ uint evaluateX(uint tid,
 }
 
 
-uint evaluateY(uint tid,
-               uint offset,
-               MapAtlasLevelInfo atlasInfo,
-               bool dryRun)
+uint evaluateVertical(uint tid,
+                     uint offset,
+                     MapAtlasLevelInfo atlasInfo,
+                     bool dryRun)
 {
-
     float invWidth = atlasInfo.inverseSize.x;
     float invHeight = atlasInfo.inverseSize.y;
 
     for(int x=int(tid); x < atlasInfo.size.x; x+=THREAD_SIZE)
     {
-        float u = float(x) * invWidth;
         int lineStart = INVALID_OFFSET;
-        
+        float v0Offset = 0;
+        float u = 0;
+
         for(int y=0; y < atlasInfo.size.y; ++y)
         {
             bool leftVisible = sampleCoord(ivec2(x-1, y), atlasInfo);
@@ -114,7 +135,17 @@ uint evaluateY(uint tid,
             {
                 if(lineStart == INVALID_OFFSET)
                 {
+                    float uoffset = (leftVisible ? UV_OFFSET_AMOUNT : -UV_OFFSET_AMOUNT);
+                    u = (float(x) + uoffset) * invWidth;
+
                     lineStart = y;
+
+                    bool downVisible = sampleCoord(ivec2(x, y-1), atlasInfo);
+                    v0Offset = (downVisible ? UV_OFFSET_AMOUNT : -UV_OFFSET_AMOUNT)
+                                + UV_OFFSET_BASE
+                                + UV_Y_OFFSET
+                                ;
+
                 }
             }
             else if(lineStart != INVALID_OFFSET)
@@ -123,18 +154,91 @@ uint evaluateY(uint tid,
                 if(!dryRun)
                 {
                     uint lineEnd = y;
-                    // Extend the end to handle wall segments
-                    if(!middleVisible)
-                    {
-                        ++lineEnd;
-                    }
 
-                    outLines[writeId] = vec4(u,
-                                             float(lineStart) * invHeight,
-                                             u,
-                                             float(lineEnd) * invHeight);
+                    float v0 = (float(lineStart) + v0Offset) * invHeight;
+                    float v1Offset = (middleVisible ? -UV_OFFSET_AMOUNT : UV_OFFSET_AMOUNT)
+                                    - UV_OFFSET_BASE
+                                    + UV_Y_OFFSET
+                                    ;
+                    float v1 = (float(lineEnd) + v1Offset) * invHeight;
+
+                    outLines[writeId] = vec4(u, v0, u, v1);
                 }
                 lineStart = INVALID_OFFSET;
+            }
+        }
+    }
+
+    return offset;
+}
+
+
+uint evaluateCorners(uint tid,
+                     uint offset,
+                     MapAtlasLevelInfo atlasInfo,
+                     bool dryRun)
+{
+    for(int y=0; y<atlasInfo.size.y; ++y)
+    {
+        for(int x=int(tid); x<atlasInfo.size.x; x+=THREAD_SIZE)
+        {
+            bool vis = sampleCoord(ivec2(x, y), atlasInfo);
+            // if(!sampleCoord(ivec2(x, y), atlasInfo))
+            {
+                bvec4 corners = bvec4(sampleCoord(ivec2(x-1, y-1), atlasInfo) != vis,
+                                      sampleCoord(ivec2(x-1, y+1), atlasInfo) != vis,
+                                      sampleCoord(ivec2(x+1, y-1), atlasInfo) != vis,
+                                      sampleCoord(ivec2(x+1, y+1), atlasInfo) != vis);
+
+                if(!any(corners))
+                {
+                    continue;
+                }
+                
+                bvec4 adjacent = bvec4(sampleCoord(ivec2(x-1, y), atlasInfo) != vis,
+                                       sampleCoord(ivec2(x, y-1), atlasInfo) != vis,
+                                       sampleCoord(ivec2(x+1, y), atlasInfo) != vis,
+                                       sampleCoord(ivec2(x, y+1), atlasInfo) != vis);
+
+                vec2 uvOffset = vis ? vec2(-UV_OFFSET_AMOUNT, UV_OFFSET_AMOUNT)
+                                    : vec2(UV_OFFSET_AMOUNT, -UV_OFFSET_AMOUNT);
+                
+                if(corners.x && adjacent.x && adjacent.y)
+                {
+                    uint writeId = offset++;
+                    if(!dryRun)
+                    {
+                        vec4 line = vec4(vec2(x, y + UV_Y_OFFSET).xyxy) + vec4(UV_OFFSET_BASE, 0, 0, UV_OFFSET_BASE) + uvOffset.xxxx;
+                        outLines[writeId] = line * atlasInfo.inverseSize.xyxy;
+                    }
+                }
+                if(corners.y && adjacent.x && adjacent.w)
+                {
+                    uint writeId = offset++;
+                    if(!dryRun)
+                    {
+                        vec4 line = vec4(vec2(x, y + UV_Y_OFFSET).xyxy) + vec4(UV_OFFSET_BASE, 1, 0, UV_OFFSET_INVBASE) + uvOffset.xyxy;
+                        outLines[writeId] = line * atlasInfo.inverseSize.xyxy;
+                    }
+                }
+                if(corners.z && adjacent.z && adjacent.y)
+                {
+                    uint writeId = offset++;
+                    if(!dryRun)
+                    {
+                        vec4 line = vec4(vec2(x, y + UV_Y_OFFSET).xyxy) + vec4(UV_OFFSET_INVBASE, 0, 1, UV_OFFSET_BASE) + uvOffset.yxyx;
+                        outLines[writeId] = line * atlasInfo.inverseSize.xyxy;
+                    }
+                }
+                if(corners.w && adjacent.z && adjacent.w)
+                {
+                    uint writeId = offset++;
+                    if(!dryRun)
+                    {
+                        vec4 line = vec4(vec2(x, y + UV_Y_OFFSET).xyxy) + vec4(UV_OFFSET_INVBASE, 1, 1, UV_OFFSET_INVBASE) + uvOffset.yyyy;
+                        outLines[writeId] = line * atlasInfo.inverseSize.xyxy;
+                    }
+                }
             }
         }
     }
@@ -149,8 +253,10 @@ void main()
     uint level = globals.currentLevel;
     MapAtlasLevelInfo atlasInfo = getLevelAtlasInfo(level);
 
-    lineAllocator[tid] = evaluateY(tid, 0, atlasInfo, true)
-                       + evaluateX(tid, 0, atlasInfo, true);
+    lineAllocator[tid] = evaluateHorizontal(tid, 0, atlasInfo, true)
+                       + evaluateVertical(tid, 0, atlasInfo, true)
+                       + evaluateCorners(tid, 0, atlasInfo, true)
+                        ;
     barrier();
 
     uint offset = 0;
@@ -159,8 +265,10 @@ void main()
         offset += lineAllocator[i];
     }
 
-    offset = evaluateY(tid, offset, atlasInfo, false);
-    offset = evaluateX(tid, offset, atlasInfo, false);
+    offset = evaluateHorizontal(tid, offset, atlasInfo, false);
+    offset = evaluateVertical(tid, offset, atlasInfo, false);
+    offset = evaluateCorners(tid, offset, atlasInfo, false);
+
 
     if(tid == (THREAD_SIZE-1))
     {

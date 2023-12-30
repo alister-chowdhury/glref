@@ -79,7 +79,7 @@ _DEBUG_DRAW_LINES_PROGRAM = viewport.make_permutation_program(
 
 LEVEL_TILES_X = 128
 LEVEL_TILES_Y = 128
-MAX_LINES = 256
+MAX_LINES = 512
 BVH_NUM_LEVELS = 3
 
 class Renderer(object):
@@ -87,7 +87,7 @@ class Renderer(object):
 
     def __init__(self):
 
-        self.window = viewport.Window(512, 512)
+        self.window = viewport.Window(1024, 1024)
 
         self.window.on_init = self._init
         self.window.on_draw = self._draw
@@ -297,16 +297,6 @@ class Renderer(object):
         glUniform2ui(0, self._vis_pf_level, self._vis_pf_room + 1)
         glDrawArrays(GL_TRIANGLES, 0, 64 * 64 * 6)
 
-        with self._active_background_map.bind():
-            glViewport(0, 0, 64 * 16, 64 * 16)
-            glUseProgram(_RENDER_MAP_BACKGROUND_PROGRAM.one())
-            glBindBufferBase(GL_UNIFORM_BUFFER, 0, self._global_parameters)
-            glBindImageTexture(1, self._map_atlas, 0, False, 0, GL_READ_ONLY, GL_R32UI)
-            glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 2, self._asset_atlas_data)
-            glBindImageTexture(3, self._asset_atlas_base, 0, False, 0, GL_READ_ONLY, GL_RGBA8)
-            glBindImageTexture(4, self._asset_atlas_norm, 0, False, 0, GL_READ_ONLY, GL_RGBA8)
-            glDrawArrays(GL_TRIANGLES, 0, 64 * 64 * 6)
-        glViewport(0, 0, wnd.width, wnd.height)
 
         # Generate visibility lines
         glUseProgram(_GEN_MAP_LINES_COMP_PROGRAM.get())
@@ -323,8 +313,20 @@ class Renderer(object):
         glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 1, self._bvh_buffer)
         glBindBufferBase(GL_UNIFORM_BUFFER, 2, self._num_lines_buffer)
         glDispatchCompute(1, 1, 1)
-
         glMemoryBarrier(GL_SHADER_STORAGE_BARRIER_BIT)
+
+        with self._active_background_map.bind():
+            glViewport(0, 0, 64 * 16, 64 * 16)
+            glUseProgram(_RENDER_MAP_BACKGROUND_PROGRAM.one())
+            glBindBufferBase(GL_UNIFORM_BUFFER, 0, self._global_parameters)
+            glBindImageTexture(1, self._map_atlas, 0, False, 0, GL_READ_ONLY, GL_R32UI)
+            glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 2, self._asset_atlas_data)
+            glBindImageTexture(3, self._asset_atlas_base, 0, False, 0, GL_READ_ONLY, GL_RGBA8)
+            glBindImageTexture(4, self._asset_atlas_norm, 0, False, 0, GL_READ_ONLY, GL_RGBA8)
+            glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 5, self._bvh_buffer)
+            glDrawArrays(GL_TRIANGLES, 0, 64 * 64 * 6)
+        glViewport(0, 0, wnd.width, wnd.height)
+
 
         glUseProgram(_DEBUG_TEST_BACKGROUND_NORMALS_PROGRAM.get(
             VS_OUTPUT_UV=0,
