@@ -9,6 +9,9 @@
 #define MAX_LEVEL_DIM       64
 
 
+#define BACKGROUND_TILE_DIM     MAX_LEVEL_DIM
+
+
 // A room value of 0, is unassigned
 #define ATLAS_ROOM_ID_EMPTY     0
 
@@ -116,6 +119,18 @@ MapAtlasLevelInfo getLevelAtlasInfo(uint level)
                                              5u,
                                              24u);
     }
+}
+
+
+float getLevelToBackgroundScale(MapAtlasLevelInfo atlasInfo)
+{
+    return float(atlasInfo.size.x) / BACKGROUND_TILE_DIM;
+}
+
+
+float getBackgroundToLevelScale(MapAtlasLevelInfo atlasInfo)
+{
+    return atlasInfo.inverseSize.x * BACKGROUND_TILE_DIM;
 }
 
 

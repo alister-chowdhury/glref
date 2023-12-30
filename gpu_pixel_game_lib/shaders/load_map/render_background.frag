@@ -1,5 +1,7 @@
 #version 460 core
 
+#include "../map_atlas_common.glsli"
+
 #define LINE_BVH_V2_STACK_SIZE 9
 #define LINE_BVH_V2_BINDING 5
 // #include "../../../shaders/grid_based_bvh/v2_tracing.glsli"
@@ -17,8 +19,11 @@ void main()
 {
     ivec2 coord = ivec2(pixelCoordAndHeight.xy);
 
-    float AO = findNearestDistanceBvhV2(uv, 1.0);
-    AO = (sqrt(AO) * 2.0 + 0.4);
+    // Raycast from the base of walls, rather than the
+    // line itself.
+    float AO = findNearestDistanceBvhV2(uv + vec2(0, 0.5 / BACKGROUND_TILE_DIM),
+                                        1.0);
+    AO = (sqrt(AO) * 5.0 + 0.4);
     AO = clamp(AO, 0.0, 1.0);
 
     // Decrease AO up walls

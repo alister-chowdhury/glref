@@ -1,11 +1,5 @@
 #version 460 core
 
-// TODO
-// CHANGE THIS TO BE IN RENDER BUFFER SPACE
-// SO DISTANCES N STUFF ARE GLOBAL, RATHER THAN
-// RELATIVE TO THE MAP SIZE!
-
-
 #include "../common.glsli"
 #include "../map_atlas_common.glsli"
 
@@ -54,8 +48,8 @@ uint evaluateHorizontal(uint tid,
                         MapAtlasLevelInfo atlasInfo,
                         bool dryRun)
 {
-    float invWidth = atlasInfo.inverseSize.x;
-    float invHeight = atlasInfo.inverseSize.y;
+    float invWidth = 1.0 / BACKGROUND_TILE_DIM;
+    float invHeight = invWidth;
 
     for(int y=int(tid); y < atlasInfo.size.y; y+=THREAD_SIZE)
     {
@@ -117,8 +111,8 @@ uint evaluateVertical(uint tid,
                      MapAtlasLevelInfo atlasInfo,
                      bool dryRun)
 {
-    float invWidth = atlasInfo.inverseSize.x;
-    float invHeight = atlasInfo.inverseSize.y;
+    float invWidth = 1.0 / BACKGROUND_TILE_DIM;
+    float invHeight = invWidth;
 
     for(int x=int(tid); x < atlasInfo.size.x; x+=THREAD_SIZE)
     {
@@ -178,6 +172,10 @@ uint evaluateCorners(uint tid,
                      MapAtlasLevelInfo atlasInfo,
                      bool dryRun)
 {
+    float invWidth = 1.0 / BACKGROUND_TILE_DIM;
+    float invHeight = invWidth;
+    vec2 inverseSize = vec2(invWidth, invHeight);
+
     for(int y=0; y<atlasInfo.size.y; ++y)
     {
         for(int x=int(tid); x<atlasInfo.size.x; x+=THREAD_SIZE)
@@ -209,7 +207,7 @@ uint evaluateCorners(uint tid,
                     if(!dryRun)
                     {
                         vec4 line = vec4(vec2(x, y + UV_Y_OFFSET).xyxy) + vec4(UV_OFFSET_BASE, 0, 0, UV_OFFSET_BASE) + uvOffset.xxxx;
-                        outLines[writeId] = line * atlasInfo.inverseSize.xyxy;
+                        outLines[writeId] = line * inverseSize.xyxy;
                     }
                 }
                 if(corners.y && adjacent.x && adjacent.w)
@@ -218,7 +216,7 @@ uint evaluateCorners(uint tid,
                     if(!dryRun)
                     {
                         vec4 line = vec4(vec2(x, y + UV_Y_OFFSET).xyxy) + vec4(UV_OFFSET_BASE, 1, 0, UV_OFFSET_INVBASE) + uvOffset.xyxy;
-                        outLines[writeId] = line * atlasInfo.inverseSize.xyxy;
+                        outLines[writeId] = line * inverseSize.xyxy;
                     }
                 }
                 if(corners.z && adjacent.z && adjacent.y)
@@ -227,7 +225,7 @@ uint evaluateCorners(uint tid,
                     if(!dryRun)
                     {
                         vec4 line = vec4(vec2(x, y + UV_Y_OFFSET).xyxy) + vec4(UV_OFFSET_INVBASE, 0, 1, UV_OFFSET_BASE) + uvOffset.yxyx;
-                        outLines[writeId] = line * atlasInfo.inverseSize.xyxy;
+                        outLines[writeId] = line * inverseSize.xyxy;
                     }
                 }
                 if(corners.w && adjacent.z && adjacent.w)
@@ -236,7 +234,7 @@ uint evaluateCorners(uint tid,
                     if(!dryRun)
                     {
                         vec4 line = vec4(vec2(x, y + UV_Y_OFFSET).xyxy) + vec4(UV_OFFSET_INVBASE, 1, 1, UV_OFFSET_INVBASE) + uvOffset.yyyy;
-                        outLines[writeId] = line * atlasInfo.inverseSize.xyxy;
+                        outLines[writeId] = line * inverseSize.xyxy;
                     }
                 }
             }

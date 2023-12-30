@@ -34,15 +34,17 @@ void main()
 
     uint level = globals.currentLevel;
     MapAtlasLevelInfo atlasInfo = getLevelAtlasInfo(level);
-    float levelToScreenScale = float(max(atlasInfo.size.x, atlasInfo.size.y)) / 64.0;
+    float levelToScreenScale = getLevelToBackgroundScale(atlasInfo);
 
+    vec2 scaledUv = uv * levelToScreenScale;
+    vec2 lightSourceScaled = lightSource * levelToScreenScale;
 
     float shadow = 1.0;
 
 #if ENABLE_SHADOW_CASTING
     {
-        vec2 targetUV = lightSource;
-        vec2 fromTarget = uv - targetUV;
+        vec2 targetUV = lightSourceScaled;
+        vec2 fromTarget = scaledUv - targetUV;
         float dist = length(fromTarget);
         LineBvhV2Result hit = traceLineBvhV2(targetUV, fromTarget / dist, dist, true);
         if(hit.hit)
@@ -52,7 +54,6 @@ void main()
     }
 #endif // ENABLE_SHADOW_CASTING
 
-    vec2 scaledUv = uv * levelToScreenScale;
 
     vec3 base = texture(baseTexture, scaledUv).xyz;
     vec4 normAndZ = texture(normTexture, scaledUv);
@@ -62,7 +63,7 @@ void main()
     float maxZ = 1.0 / 64.0;
     scaledUv.y -= maxZ * Z;
 
-    vec3 lightSource3D = vec3(lightSource * levelToScreenScale, maxZLight);
+    vec3 lightSource3D = vec3(lightSourceScaled, maxZLight);
     vec3 source3D = vec3(scaledUv, maxZ * normAndZ.w);
     vec3 dL = lightSource3D - source3D;
 

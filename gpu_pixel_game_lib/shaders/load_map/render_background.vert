@@ -37,26 +37,24 @@ bool sampleCoord(ivec2 localCoord, MapAtlasLevelInfo atlasInfo)
 void main()
 {
     int pixelId = gl_VertexID / 6;
-    ivec2 levelCoord = ivec2(pixelId % 64, pixelId / 64);
+    ivec2 levelCoord = ivec2(pixelId % BACKGROUND_TILE_DIM,
+                             pixelId / BACKGROUND_TILE_DIM);
     int vertexId = triangleToQuadVertexIdZ(gl_VertexID % 6);
     vec2 localUv = vec2((vertexId & 1), (vertexId >> 1));
-    vec2 backBufferUv = (vec2(levelCoord) + localUv) * (1.0 / 64.0);
-    gl_Position = vec4(backBufferUv * 2.0 - 1.0,
+    uv = (vec2(levelCoord) + localUv) * (1.0 / 64.0);
+    gl_Position = vec4(uv * 2.0 - 1.0,
                        0.0,
                        1.0);
 
     uint level = globals.currentLevel;
     MapAtlasLevelInfo atlasInfo = getLevelAtlasInfo(level);
 
-    float levelToScreenScale = float(max(atlasInfo.size.x, atlasInfo.size.y)) / 64.0;
-    uv = (backBufferUv + vec2(0, 0.5/64.)) / levelToScreenScale;
-
-    bool cellVisible = sampleCoord(levelCoord, atlasInfo);    
-
     uint assetId = ASSET_ATLAS_ID_EMPTY;
     vec2 heights = vec2(0.0);
 
+    if((levelCoord.x < atlasInfo.size.x) && (levelCoord.y < atlasInfo.size.y))
     {
+        bool cellVisible = sampleCoord(levelCoord, atlasInfo);    
         if(cellVisible)
         {
             assetId = ASSET_ATLAS_ID_GROUND_L00_V0;
