@@ -37,6 +37,8 @@ RENDER_MAP_BACKGROUND_VERT = os.path.join(_SHADER_DIR, "load_map", "render_backg
 RENDER_MAP_BACKGROUND_FRAG = os.path.join(_SHADER_DIR, "load_map", "render_background.frag")
 DEBUG_TEST_BACKGROUND_NORMALS_FRAG = os.path.join(_SHADER_DIR, "load_map", "debug_test_background_normals.frag")
 GEN_MAP_LINES_COMP = os.path.join(_SHADER_DIR, "load_map", "gen_map_lines.comp")
+GEN_DIRECT_LIGHTING_FRAG = os.path.join(_SHADER_DIR, "load_map", "gen_direct_lighting.frag")
+FILTER_DIRECT_LIGHTING_FRAG = os.path.join(_SHADER_DIR, "load_map", "filter_direct_lighting.frag")
 
 DEBUG_DRAW_LINES_VERT = os.path.join(_SHADER_DIR, "load_map", "debug_draw_lines.vert")
 DEBUG_DRAW_LINES_FRAG = os.path.join(_SHADER_DIR, "load_map", "debug_draw_lines.frag")

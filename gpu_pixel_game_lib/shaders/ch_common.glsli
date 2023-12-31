@@ -1,0 +1,174 @@
+#ifndef CH_COMMON_GLSLI
+#define CH_COMMON_GLSLI
+
+// Circular harmonic stuff (basically spherical haromics minus a dimension)
+
+#include "common.glsli"
+
+#define SH_0 0.282094791773878143474
+#define SH_1 0.4886025119029199215864
+
+// Two-band circular harmonic
+struct CH2
+{
+    vec3 V;
+};
+
+CH2 CHZero()
+{
+    CH2 result;
+    result.V = vec3(0);
+    return result;
+}
+
+
+struct PackedRGBCH2
+{
+    vec3 V0; // R11G11B10UF
+    vec4 V1; // RGBA16F
+    vec2 V2; // RG16F
+};
+
+
+PackedRGBCH2 packRGBCH2(CH2 R, CH2 G, CH2 B)
+{
+    PackedRGBCH2 result;
+    result.V0 = vec3(R.V.x, G.V.x, B.V.x);
+    result.V1 = vec4(R.V.yz, G.V.yz);
+    result.V2 = B.V.yz;
+    return result;
+}
+
+
+void unpackRGBCH2(PackedRGBCH2 packedRGB, out CH2 R, out CH2 G, out CH2 B)
+{
+    R.V = vec3(packedRGB.V0.x, packedRGB.V1.xy);
+    G.V = vec3(packedRGB.V0.y, packedRGB.V1.zw);
+    B.V = vec3(packedRGB.V0.z, packedRGB.V2.xy);
+}
+
+
+CH2 CH2Basis(vec2 N)
+{
+    CH2 result;
+    result.V.x  = SH_0;
+    result.V.yz = N * SH_1;
+    return result;
+}
+
+
+CH2 CH2Add(CH2 A, CH2 B)
+{
+    CH2 result;
+    result.V = A.V + B.V;
+    return result;
+}
+
+CH2 CH2Mul(CH2 A, float C)
+{
+    CH2 result;
+    result.V = A.V * C;
+    return result;
+}
+
+
+float CH2Dot(CH2 A, CH2 B)
+{
+    return dot(A.V, B.V);
+}
+
+
+CH2 CH2DirectLightRadiance(vec2 N)
+{
+    CH2 result;
+    result.V.x = SH_0 * (1.0 + 1.0 / 3.0);
+    result.V.yz = N * SH_1;
+    return result;
+}
+
+
+CH2 CH2PointLightRadiance(vec2 toPointLightDir)
+{
+    // https://www.geogebra.org/calculator/bf59hwnr
+    CH2 result;
+    result.V.x  = SH_0 * INVPI;
+    result.V.yz = toPointLightDir * SH_1 * 0.25;
+    return result;
+}
+
+
+// E controls the ambient term
+// 0 = Low ambient
+// 1 = Normal ambient
+CH2 CH2DirectLightRadianceExp(vec2 N, float E)
+{
+    CH2 result;
+    result.V.x = SH_0 * (1.0 + E / 3.0);
+    result.V.yz = N * SH_1 * (1.0 + (1.0 - E) / 3.0);
+    return result;
+}
+
+
+CH2 CH2DiffuseTransfer(vec2 N)
+{
+    CH2 result;
+    result.V.x  = SH_0 * PI;
+    result.V.yz = N * (SH_1 * 2.0 / 3.0 * PI);
+    return result;
+}
+
+
+// Accumulate a point light for direct lighting
+void CH2AccumPointLight(vec2 toPointLightDir, float col, inout CH2 Y)
+{
+    CH2 pl = CH2PointLightRadiance(toPointLightDir);
+    Y = CH2Add(Y, CH2Mul(pl, col));
+}
+
+
+void CH2AccumPointLight(vec2 toPointLightDir,
+                        vec3 col,
+                        inout CH2 R,
+                        inout CH2 G,
+                        inout CH2 B)
+{
+    CH2 pl = CH2PointLightRadiance(toPointLightDir);
+    R = CH2Add(R, CH2Mul(pl, col.x));
+    G = CH2Add(G, CH2Mul(pl, col.y));
+    B = CH2Add(B, CH2Mul(pl, col.z));
+}
+
+
+// Logic for storing approximations of radiance, which we can happily
+// use to accelerate direct lighting calculations.
+//
+// https://grahamhazel.com/blog/2017/12/22/converting-sh-radiance-to-irradiance/
+
+CH2 CH2LambertianRadianceBasis(vec2 N)
+{
+    CH2 result;
+    result.V.x  = SH_0 * 4.0;
+    result.V.yz = N * (SH_1 * 4.0);
+    return result;
+}
+
+
+float CH2RadianceEval(CH2 RadianceCH, vec2 N)
+{
+    float ratio = length(RadianceCH.V.yz) / RadianceCH.V.x;
+    float q = 0.5 * dot(N, RadianceCH.V.yz) + 0.5;
+    float p = 2.0 * ratio + 1.0;
+    float a = (1.0 - ratio) / (1.0 + ratio);
+    return RadianceCH.V.x * (a + (1.0 - a) * (p + 1.0) * pow(q, p));
+}
+
+
+vec3 CH2RadianceEval(CH2 R, CH2 G, CH2 B, vec2 N)
+{
+    return vec3(CH2RadianceEval(R, N),
+                CH2RadianceEval(G, N),
+                CH2RadianceEval(B, N));
+}
+
+
+#endif // CH_COMMON_GLSLI

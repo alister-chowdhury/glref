@@ -2,6 +2,7 @@
 
 #include "../common.glsli"
 #include "../map_atlas_common.glsli"
+#include "../ch_common.glsli"
 
 
 #define LINE_BVH_V2_STACK_SIZE 9
@@ -17,6 +18,10 @@ layout(set=0, binding = 0) uniform GlobalParameters_
 
 layout(binding=1) uniform sampler2D baseTexture;
 layout(binding=2) uniform sampler2D normTexture;
+
+layout(binding=4) uniform sampler2D directLightingV0;
+layout(binding=5) uniform sampler2D directLightingV1;
+layout(binding=6) uniform sampler2D directLightingV2;
     
 layout(location=0) in vec2    uv;
 layout(location=0) out vec4   outCol;
@@ -61,6 +66,19 @@ void main()
     float Z = normAndZ.w;
     float maxZLight = 8.0 / 64.0;
     float maxZ = 1.0 / 64.0;
+
+    // Scene lighting
+    PackedRGBCH2 packedRGB;
+    packedRGB.V0 = texture(directLightingV0, scaledUv).xyz;
+    packedRGB.V1 = texture(directLightingV1, scaledUv).xyzw;
+    packedRGB.V2 = texture(directLightingV2, scaledUv).xy;
+    CH2 R, G, B;
+    unpackRGBCH2(packedRGB, R, G, B);
+    CH2 directCH = CH2LambertianRadianceBasis(norm.xy * (Z * 0.9 + 0.1));
+    vec3 directLight = vec3(CH2Dot(directCH, R),
+                            CH2Dot(directCH, G),
+                            CH2Dot(directCH, B));
+
     scaledUv.y -= maxZ * Z;
 
     vec3 lightSource3D = vec3(lightSourceScaled, maxZLight);
@@ -69,13 +87,8 @@ void main()
 
     vec3 L = normalize(dL);
     float damp = evaluatePointLightAttenuation(length(dL), 5);
-    damp *= 4;
     damp = max(0, min(1, damp));
+    float visLighting = max(0, min(1, dot(norm, L))) * damp;
 
-
-    outCol = vec4(max(0, min(1, dot(norm, L))) * base * damp * shadow, 1);
-
-    // outCol.xyz = base;
-    // outCol.xyz = L;
-    // outCol.xyz = vec3(abs(dot(norm, L)));
+    outCol = vec4((directLight + visLighting) * base * shadow, 1);
 }

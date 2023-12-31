@@ -70,6 +70,18 @@ _GENERATE_BVH_PROGRAM = viewport.make_permutation_program(
     GL_COMPUTE_SHADER = os.path.join(_BVH_SHADER_DIR, "generate_bvh.comp")
 )
 
+_GEN_DIRECT_LIGHTING_PROGRAM = viewport.make_permutation_program(
+    _DEBUGGING,
+    GL_VERTEX_SHADER = _DRAW_FULL_SCREEN_PATH,
+    GL_FRAGMENT_SHADER = gpu_pixel_game_lib.GEN_DIRECT_LIGHTING_FRAG
+)
+
+_FILTER_DIRECT_LIGHTING_PROGRAM = viewport.make_permutation_program(
+    _DEBUGGING,
+    GL_VERTEX_SHADER = _DRAW_FULL_SCREEN_PATH,
+    GL_FRAGMENT_SHADER = gpu_pixel_game_lib.FILTER_DIRECT_LIGHTING_FRAG
+)
+
 _DEBUG_DRAW_LINES_PROGRAM = viewport.make_permutation_program(
     _DEBUGGING,
     GL_VERTEX_SHADER = gpu_pixel_game_lib.DEBUG_DRAW_LINES_VERT,
@@ -158,6 +170,63 @@ class Renderer(object):
             (self._active_background_map_base, self._active_background_map_norm),
             64 * 16,
             64 * 16
+        )
+
+
+        direct_lighting_texture_settings = {
+            GL_TEXTURE_WRAP_S: GL_REPEAT,
+            GL_TEXTURE_WRAP_T: GL_CLAMP_TO_EDGE,
+            GL_TEXTURE_MIN_FILTER: GL_LINEAR,
+            GL_TEXTURE_MAG_FILTER: GL_LINEAR
+        }
+        self._direct_lighting_bg_map_v0 = viewport.FramebufferTarget(
+            GL_R11F_G11F_B10F,
+            True,
+            custom_texture_settings=direct_lighting_texture_settings
+        )
+        self._direct_lighting_bg_map_v1 = viewport.FramebufferTarget(
+            GL_RGBA16F,
+            True,
+            custom_texture_settings=direct_lighting_texture_settings
+        )
+        self._direct_lighting_bg_map_v2 = viewport.FramebufferTarget(
+            GL_RG16F,
+            True,
+            custom_texture_settings=direct_lighting_texture_settings
+        )
+        self._direct_lighting_bg_map = viewport.Framebuffer(
+            (
+                self._direct_lighting_bg_map_v0,
+                self._direct_lighting_bg_map_v1,
+                self._direct_lighting_bg_map_v2,
+            ),
+            64 * 8,
+            64 * 8
+        )
+
+        self._filt_direct_lighting_bg_map_v0 = viewport.FramebufferTarget(
+            GL_R11F_G11F_B10F,
+            True,
+            custom_texture_settings=direct_lighting_texture_settings
+        )
+        self._filt_direct_lighting_bg_map_v1 = viewport.FramebufferTarget(
+            GL_RGBA16F,
+            True,
+            custom_texture_settings=direct_lighting_texture_settings
+        )
+        self._filt_direct_lighting_bg_map_v2 = viewport.FramebufferTarget(
+            GL_RG16F,
+            True,
+            custom_texture_settings=direct_lighting_texture_settings
+        )
+        self._filt_direct_lighting_bg_map = viewport.Framebuffer(
+            (
+                self._filt_direct_lighting_bg_map_v0,
+                self._filt_direct_lighting_bg_map_v1,
+                self._filt_direct_lighting_bg_map_v2,
+            ),
+            64 * 8,
+            64 * 8
         )
 
         global_parameters = numpy.array(
@@ -315,6 +384,24 @@ class Renderer(object):
         glDispatchCompute(1, 1, 1)
         glMemoryBarrier(GL_SHADER_STORAGE_BARRIER_BIT)
 
+        with self._filt_direct_lighting_bg_map.bind():
+            glViewport(0, 0, 64 * 8, 64 * 8)
+            glUseProgram(_GEN_DIRECT_LIGHTING_PROGRAM.get(VS_OUTPUT_UV=0))
+            glBindBufferBase(GL_UNIFORM_BUFFER, 0, self._global_parameters)
+            glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 1, self._map_atlas_level_data)
+            glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 2, self._bvh_buffer)
+            glBindVertexArray(viewport.get_dummy_vao())
+            glDrawArrays(GL_TRIANGLES, 0, 3)
+
+        with self._direct_lighting_bg_map.bind():
+            glViewport(0, 0, 64 * 8, 64 * 8)
+            glUseProgram(_FILTER_DIRECT_LIGHTING_PROGRAM.get(VS_OUTPUT_UV=0))
+            glBindTextureUnit(0, self._filt_direct_lighting_bg_map_v0.texture)
+            glBindTextureUnit(1, self._filt_direct_lighting_bg_map_v1.texture)
+            glBindTextureUnit(2, self._filt_direct_lighting_bg_map_v2.texture)
+            glBindVertexArray(viewport.get_dummy_vao())
+            glDrawArrays(GL_TRIANGLES, 0, 3)
+
         with self._active_background_map.bind():
             glViewport(0, 0, 64 * 16, 64 * 16)
             glUseProgram(_RENDER_MAP_BACKGROUND_PROGRAM.one())
@@ -336,6 +423,9 @@ class Renderer(object):
         glBindTextureUnit(1, self._active_background_map_base.texture)
         glBindTextureUnit(2, self._active_background_map_norm.texture)
         glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 3, self._bvh_buffer)
+        glBindTextureUnit(4, self._direct_lighting_bg_map_v0.texture)
+        glBindTextureUnit(5, self._direct_lighting_bg_map_v1.texture)
+        glBindTextureUnit(6, self._direct_lighting_bg_map_v2.texture)
         glUniform2f(0, self._mouse_uv[0], 1 - self._mouse_uv[1])
         glDrawArrays(GL_TRIANGLES, 0, 3)
 

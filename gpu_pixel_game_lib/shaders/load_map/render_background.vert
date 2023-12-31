@@ -41,7 +41,7 @@ void main()
                              pixelId / BACKGROUND_TILE_DIM);
     int vertexId = triangleToQuadVertexIdZ(gl_VertexID % 6);
     vec2 localUv = vec2((vertexId & 1), (vertexId >> 1));
-    uv = (vec2(levelCoord) + localUv) * (1.0 / 64.0);
+    uv = (vec2(levelCoord) + localUv) * (1.0 / BACKGROUND_TILE_DIM);
     gl_Position = vec4(uv * 2.0 - 1.0,
                        0.0,
                        1.0);
@@ -62,7 +62,21 @@ void main()
         else
         {
             assetId = ASSET_ATLAS_ID_BRICKS_L00_V0;
-            heights.y = 1.0;
+
+            if(sampleCoord(levelCoord - ivec2(0, 1), atlasInfo))
+            {
+                heights.y = 1.0;
+            }
+            else
+            {
+                // This is a hack to blend wall corners
+                // it makes no sense whatsoever, if it breaks
+                // stuff, just disable this branch
+                if(sampleCoord(levelCoord - ivec2(0, 2), atlasInfo))
+                {
+                    heights.x = 0.5;
+                }
+            }
         }
 
         // Effectively:
