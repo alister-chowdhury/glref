@@ -1,5 +1,9 @@
 #version 460 core
 
+
+// Swap this out to maybe use circular shadow mapping
+// this can get quite expensive at the higher levels.
+
 #include "../common.glsli"
 #include "../map_atlas_common.glsli"
 #include "../ch_common.glsli"

@@ -4,29 +4,26 @@
 #include "../map_atlas_common.glsli"
 #include "../ch_common.glsli"
 
-
-#define LINE_BVH_V2_STACK_SIZE 9
-#define LINE_BVH_V2_BINDING 3
-// #include "../../../shaders/grid_based_bvh/v2_tracing.glsli"
-#include "../v2_tracing.glsli"
-
-
 layout(set=0, binding = 0) uniform GlobalParameters_
 {
     GlobalParameters globals;
-}; 
+};
 
-layout(binding=1) uniform sampler2D baseTexture;
-layout(binding=2) uniform sampler2D normTexture;
+layout(set=0, binding = 1) uniform playerPos_
+{
+    vec2 playerPos;
+};
 
-layout(binding=4) uniform sampler2D directLightingV0;
-layout(binding=5) uniform sampler2D directLightingV1;
-layout(binding=6) uniform sampler2D directLightingV2;
+layout(binding=2) uniform sampler2D baseTexture;
+layout(binding=3) uniform sampler2D normTexture;
+layout(binding=4) uniform sampler2D visibilityTexture;
+layout(binding=5) uniform sampler2D directLightingV0;
+layout(binding=6) uniform sampler2D directLightingV1;
+layout(binding=7) uniform sampler2D directLightingV2;
+layout(binding=8) uniform sampler2D visHistoryTexture;
     
 layout(location=0) in vec2    uv;
 layout(location=0) out vec4   outCol;
-
-layout(location=0) uniform vec2 lightSource;
 
 
 float evaluatePointLightAttenuation(float dist, float decayRate)
@@ -42,23 +39,8 @@ void main()
     float levelToScreenScale = getLevelToBackgroundScale(atlasInfo);
 
     vec2 scaledUv = uv * levelToScreenScale;
-    vec2 lightSourceScaled = lightSource * levelToScreenScale;
-
-    float shadow = 1.0;
-
-#if ENABLE_SHADOW_CASTING
-    {
-        vec2 targetUV = lightSourceScaled;
-        vec2 fromTarget = scaledUv - targetUV;
-        float dist = length(fromTarget);
-        LineBvhV2Result hit = traceLineBvhV2(targetUV, fromTarget / dist, dist, true);
-        if(hit.hit)
-        {
-            shadow = 0;
-        }
-    }
-#endif // ENABLE_SHADOW_CASTING
-
+    float shadow = texture(visibilityTexture, scaledUv).x;
+    float shadowHistory = texture(visHistoryTexture, levelUVToAtlasUV(uv, atlasInfo)).x;
 
     vec3 base = texture(baseTexture, scaledUv).xyz;
     vec4 normAndZ = texture(normTexture, scaledUv);
@@ -81,14 +63,14 @@ void main()
 
     scaledUv.y -= maxZ * Z;
 
-    vec3 lightSource3D = vec3(lightSourceScaled, maxZLight);
+    vec3 playerPos3D = vec3(playerPos, maxZLight);
     vec3 source3D = vec3(scaledUv, maxZ * normAndZ.w);
-    vec3 dL = lightSource3D - source3D;
+    vec3 dL = playerPos3D - source3D;
 
     vec3 L = normalize(dL);
     float damp = evaluatePointLightAttenuation(length(dL), 5);
     damp = max(0, min(1, damp));
     float visLighting = max(0, min(1, dot(norm, L))) * damp;
 
-    outCol = vec4((directLight + visLighting) * base * shadow, 1);
+    outCol = vec4((directLight * shadowHistory + visLighting * shadow) * base, 1);
 }

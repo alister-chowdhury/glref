@@ -4,6 +4,7 @@ import os
 import numpy
 
 from OpenGL.GL import *
+from ctypes import c_void_p
 from PIL import Image
 
 import viewport
@@ -42,6 +43,12 @@ FINISH_MAP_GEN_PROGRAM = viewport.make_permutation_program(
     GL_COMPUTE_SHADER = gpu_pixel_game_lib.FINISH_MAP_GEN_COMP
 )
 
+_VIS_CLEAR_HISTORY_PROGRAM = viewport.make_permutation_program(
+    _DEBUGGING,
+    GL_VERTEX_SHADER = _DRAW_FULL_SCREEN_PATH,
+    GL_FRAGMENT_SHADER = gpu_pixel_game_lib.VIS_CLEAR_HISTORY_FRAG
+)
+
 _DEBUG_VIS_PATHFINDING_DIRECTIONS_PROGRAM = viewport.make_permutation_program(
     _DEBUGGING,
     GL_VERTEX_SHADER = gpu_pixel_game_lib.DEBUG_VIS_PATHFINDING_DIRECTIONS_VERT,
@@ -52,12 +59,6 @@ _RENDER_MAP_BACKGROUND_PROGRAM = viewport.make_permutation_program(
     _DEBUGGING,
     GL_VERTEX_SHADER = gpu_pixel_game_lib.RENDER_MAP_BACKGROUND_VERT,
     GL_FRAGMENT_SHADER = gpu_pixel_game_lib.RENDER_MAP_BACKGROUND_FRAG
-)
-
-_DEBUG_TEST_BACKGROUND_NORMALS_PROGRAM = viewport.make_permutation_program(
-    _DEBUGGING,
-    GL_VERTEX_SHADER = _DRAW_FULL_SCREEN_PATH,
-    GL_FRAGMENT_SHADER = gpu_pixel_game_lib.DEBUG_TEST_BACKGROUND_NORMALS_FRAG
 )
 
 _GEN_MAP_LINES_COMP_PROGRAM = viewport.make_permutation_program(
@@ -88,11 +89,67 @@ _DEBUG_DRAW_LINES_PROGRAM = viewport.make_permutation_program(
     GL_FRAGMENT_SHADER = gpu_pixel_game_lib.DEBUG_DRAW_LINES_FRAG
 )
 
+_DEBUG_SET_PLAYER_POS_PROGRAM = viewport.make_permutation_program(
+    _DEBUGGING,
+    GL_COMPUTE_SHADER = gpu_pixel_game_lib.DEBUG_SET_PLAYER_POS_COMP
+)
+
+_VIS_GENERATE_PROGRAM = viewport.make_permutation_program(
+    _DEBUGGING,
+    GL_VERTEX_SHADER = gpu_pixel_game_lib.VIS_GENERATE_VERT,
+    GL_FRAGMENT_SHADER = gpu_pixel_game_lib.VIS_GENERATE_FRAG
+)
+
+_VIS_GENERATE_CLEAR_PROGRAM = viewport.make_permutation_program(
+    _DEBUGGING,
+    GL_VERTEX_SHADER = _DRAW_FULL_SCREEN_PATH,
+    GL_FRAGMENT_SHADER = gpu_pixel_game_lib.VIS_GENERATE_CLEAR_FRAG
+)
+
+_VIS_FILTER_PROGRAM = viewport.make_permutation_program(
+    _DEBUGGING,
+    GL_VERTEX_SHADER = _DRAW_FULL_SCREEN_PATH,
+    GL_FRAGMENT_SHADER = gpu_pixel_game_lib.VIS_FILTER_FRAG
+)
+
+_VIS_UPDATE_HISTORY_PROGRAM = viewport.make_permutation_program(
+    _DEBUGGING,
+    GL_VERTEX_SHADER = gpu_pixel_game_lib.VIS_UPDATE_HISTORY_VERT,
+    GL_FRAGMENT_SHADER = gpu_pixel_game_lib.VIS_UPDATE_HISTORY_FRAG
+)
+
+_DEBUG_TEST_BACKGROUND_NORMALS_PROGRAM = viewport.make_permutation_program(
+    _DEBUGGING,
+    GL_VERTEX_SHADER = _DRAW_FULL_SCREEN_PATH,
+    GL_FRAGMENT_SHADER = gpu_pixel_game_lib.DEBUG_TEST_BACKGROUND_NORMALS_FRAG
+)
+
 
 LEVEL_TILES_X = 128
 LEVEL_TILES_Y = 128
+
+VIS_BUFFER_TILE_SIZE = 8
+
+VIS_HISTORY_X = LEVEL_TILES_X * VIS_BUFFER_TILE_SIZE
+VIS_HISTORY_Y = LEVEL_TILES_Y * VIS_BUFFER_TILE_SIZE
+
+ACTIVE_NUM_TILES = 64
+BACKGROUND_TILE_SIZE = 16
+DIRECT_LIGHTING_TILE_SIZE = 8
+
+ACTIVE_BACKGROUND_SIZE = ACTIVE_NUM_TILES * BACKGROUND_TILE_SIZE
+ACTIVE_DIRECT_LIGHTING_SIZE = ACTIVE_NUM_TILES * DIRECT_LIGHTING_TILE_SIZE
+ACTIVE_VIS_SIZE = ACTIVE_NUM_TILES * VIS_BUFFER_TILE_SIZE
+
 MAX_LINES = 512
 BVH_NUM_LEVELS = 3
+
+VIS_DISPATCH_OFFSET = 0
+
+        
+def ubo_align_size(x):
+    return x + (-x & 15)
+
 
 class Renderer(object):
 
@@ -107,6 +164,9 @@ class Renderer(object):
         self.window.on_drag = self._drag
         self.window.on_mouse = self._mouse
         self.window.on_keypress = self._keypress
+
+        self._dirty_init_levels = True
+        self._dirty_load_level = True
 
         self._n = -1
         self._vis_pf_level = 0
@@ -164,35 +224,47 @@ class Renderer(object):
             gpu_pixel_game_lib.ASSET_ATLAS_NORM
         )
 
-        self._active_background_map_base = viewport.FramebufferTarget(GL_RGBA8, True)
-        self._active_background_map_norm = viewport.FramebufferTarget(GL_RGBA8, True)
-        self._active_background_map = viewport.Framebuffer(
-            (self._active_background_map_base, self._active_background_map_norm),
-            64 * 16,
-            64 * 16
-        )
-
-
-        direct_lighting_texture_settings = {
+        lininterp_texture_settings = {
             GL_TEXTURE_WRAP_S: GL_REPEAT,
             GL_TEXTURE_WRAP_T: GL_CLAMP_TO_EDGE,
             GL_TEXTURE_MIN_FILTER: GL_LINEAR,
             GL_TEXTURE_MAG_FILTER: GL_LINEAR
         }
+        
+        self._vis_history = viewport.FramebufferTarget(
+            GL_R8,
+            True,
+            custom_texture_settings=lininterp_texture_settings
+        )
+        self._vis_history_fb = viewport.Framebuffer(
+            (self._vis_history,),
+            VIS_HISTORY_X,
+            VIS_HISTORY_Y
+        )
+
+        self._active_background_map_base = viewport.FramebufferTarget(GL_RGBA8, True)
+        self._active_background_map_norm = viewport.FramebufferTarget(GL_RGBA8, True)
+        self._active_background_map = viewport.Framebuffer(
+            (self._active_background_map_base, self._active_background_map_norm),
+            ACTIVE_BACKGROUND_SIZE,
+            ACTIVE_BACKGROUND_SIZE
+        )
+
+
         self._direct_lighting_bg_map_v0 = viewport.FramebufferTarget(
             GL_R11F_G11F_B10F,
             True,
-            custom_texture_settings=direct_lighting_texture_settings
+            custom_texture_settings=lininterp_texture_settings
         )
         self._direct_lighting_bg_map_v1 = viewport.FramebufferTarget(
             GL_RGBA16F,
             True,
-            custom_texture_settings=direct_lighting_texture_settings
+            custom_texture_settings=lininterp_texture_settings
         )
         self._direct_lighting_bg_map_v2 = viewport.FramebufferTarget(
             GL_RG16F,
             True,
-            custom_texture_settings=direct_lighting_texture_settings
+            custom_texture_settings=lininterp_texture_settings
         )
         self._direct_lighting_bg_map = viewport.Framebuffer(
             (
@@ -200,24 +272,24 @@ class Renderer(object):
                 self._direct_lighting_bg_map_v1,
                 self._direct_lighting_bg_map_v2,
             ),
-            64 * 8,
-            64 * 8
+            ACTIVE_DIRECT_LIGHTING_SIZE,
+            ACTIVE_DIRECT_LIGHTING_SIZE
         )
 
         self._filt_direct_lighting_bg_map_v0 = viewport.FramebufferTarget(
             GL_R11F_G11F_B10F,
             True,
-            custom_texture_settings=direct_lighting_texture_settings
+            custom_texture_settings=lininterp_texture_settings
         )
         self._filt_direct_lighting_bg_map_v1 = viewport.FramebufferTarget(
             GL_RGBA16F,
             True,
-            custom_texture_settings=direct_lighting_texture_settings
+            custom_texture_settings=lininterp_texture_settings
         )
         self._filt_direct_lighting_bg_map_v2 = viewport.FramebufferTarget(
             GL_RG16F,
             True,
-            custom_texture_settings=direct_lighting_texture_settings
+            custom_texture_settings=lininterp_texture_settings
         )
         self._filt_direct_lighting_bg_map = viewport.Framebuffer(
             (
@@ -225,8 +297,34 @@ class Renderer(object):
                 self._filt_direct_lighting_bg_map_v1,
                 self._filt_direct_lighting_bg_map_v2,
             ),
-            64 * 8,
-            64 * 8
+            ACTIVE_DIRECT_LIGHTING_SIZE,
+            ACTIVE_DIRECT_LIGHTING_SIZE
+        )
+
+        self._active_vis = viewport.FramebufferTarget(
+            GL_R8,
+            True,
+            custom_texture_settings=lininterp_texture_settings
+        )
+        self._active_vis_fb = viewport.Framebuffer(
+            (self._active_vis,),
+            ACTIVE_VIS_SIZE,
+            ACTIVE_VIS_SIZE
+        )
+
+        self._filt_active_vis = viewport.FramebufferTarget(
+            GL_R8,
+            True,
+            custom_texture_settings=lininterp_texture_settings
+        )
+        self._filt_active_vis_stencil = viewport.FramebufferTarget(
+            GL_STENCIL_INDEX8,
+            False
+        )
+        self._filt_active_vis_fb = viewport.Framebuffer(
+            (self._filt_active_vis, self._filt_active_vis_stencil),
+            ACTIVE_VIS_SIZE,
+            ACTIVE_VIS_SIZE
         )
 
         global_parameters = numpy.array(
@@ -257,6 +355,20 @@ class Renderer(object):
         self._map_atlas_level_data = self._buffers_ptr[1]
         glNamedBufferStorage(self._map_atlas_level_data, (4 * 8 * (32 + 3)), None, 0)
 
+        # gonna need to deal with this better
+        indirection_table = numpy.array(
+            [
+                # vis history
+                0, 1, 0, 0
+            ],
+            dtype=numpy.uint32
+        ).tobytes()
+
+        self._indirection_table = self._buffers_ptr[2]
+        glNamedBufferStorage(self._indirection_table, len(indirection_table), indirection_table, 0)
+
+        self._player_pos = self._buffers_ptr[3]
+        glNamedBufferStorage(self._player_pos, ubo_align_size(4*2), None, 0)
 
         self._map_atlas_ptr = ctypes.c_int()
         glCreateTextures(GL_TEXTURE_2D, 1, self._map_atlas_ptr)
@@ -306,9 +418,6 @@ class Renderer(object):
             GL_UNSIGNED_INT,
             numpy.array([0, 0], dtype=numpy.uint32).tobytes()
         )
-        
-        def ubo_align_size(x):
-            return x + (-x & 15)
 
         self._line_buffers_ptr = (ctypes.c_int * 3)()
         glCreateBuffers(3, self._line_buffers_ptr)
@@ -331,102 +440,163 @@ class Renderer(object):
     def _draw(self, wnd):
         glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT)
 
-        glUseProgram(_GEN_MAP_ATLAS_PROGRAM.one())
-        glBindBufferBase(GL_UNIFORM_BUFFER, 0, self._global_parameters)
-        glBindImageTexture(1, self._map_atlas, 0, False, 0, GL_WRITE_ONLY, GL_R32UI)
-        glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 2, self._map_atlas_level_data)
-        glDispatchCompute(1, 1, 8)
-        glMemoryBarrier(GL_SHADER_IMAGE_ACCESS_BARRIER_BIT)
-
-        glUseProgram(_GEN_PATHFINDING_DIRECTIONS_PROGRAM.one())
-        glBindBufferBase(GL_UNIFORM_BUFFER, 0, self._global_parameters)
-        glBindImageTexture(1, self._map_atlas, 0, False, 0, GL_READ_ONLY, GL_R32UI)
-        glBindImageTexture(2, self._pathfinding_directions, 0, False, 0, GL_READ_WRITE, GL_RG32UI)
-        glDispatchCompute(1, 1, 8 * 2)
-        glMemoryBarrier(GL_SHADER_IMAGE_ACCESS_BARRIER_BIT | GL_SHADER_STORAGE_BARRIER_BIT)
-
-        glUseProgram(FINISH_MAP_GEN_PROGRAM.one())
-        glBindBufferBase(GL_UNIFORM_BUFFER, 0, self._global_parameters)
-        glBindImageTexture(1, self._map_atlas, 0, False, 0, GL_READ_ONLY, GL_R32UI)
-        glBindImageTexture(2, self._pathfinding_directions, 0, False, 0, GL_READ_ONLY, GL_RG32UI)
-        glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 3, self._map_atlas_level_data)
-        glDispatchCompute(1, 1, 8)
-        glMemoryBarrier(GL_SHADER_STORAGE_BARRIER_BIT)
-
-        glUseProgram(_DRAW_BSP_MAP_DEBUG_PROGRAM.get(VS_OUTPUT_UV=0))
-        glBindTextureUnit(0, self._map_atlas)
-        # glBindTextureUnit(0, self._pathfinding_directions)
-        glBindVertexArray(viewport.get_dummy_vao())
-        glDrawArrays(GL_TRIANGLES, 0, 3)
-
-        glUseProgram(_DEBUG_VIS_PATHFINDING_DIRECTIONS_PROGRAM.one())
-        glBindBufferBase(GL_UNIFORM_BUFFER, 0, self._global_parameters)
-        glBindImageTexture(1, self._map_atlas, 0, False, 0, GL_READ_ONLY, GL_R32UI)
-        glBindImageTexture(2, self._pathfinding_directions, 0, False, 0, GL_READ_ONLY, GL_RG32UI)
-        glUniform2ui(0, self._vis_pf_level, self._vis_pf_room + 1)
-        glDrawArrays(GL_TRIANGLES, 0, 64 * 64 * 6)
-
-
-        # Generate visibility lines
-        glUseProgram(_GEN_MAP_LINES_COMP_PROGRAM.get())
-        glBindBufferBase(GL_UNIFORM_BUFFER, 0, self._global_parameters)
-        glBindImageTexture(1, self._map_atlas, 0, False, 0, GL_READ_ONLY, GL_R32UI)
-        glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 2, self._num_lines_buffer)
-        glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 3, self._lines_buffer)
-        glDispatchCompute(1, 1, 1)
-        glMemoryBarrier(GL_UNIFORM_BARRIER_BIT | GL_SHADER_STORAGE_BARRIER_BIT)
- 
-        # Generate BVH
-        glUseProgram(_GENERATE_BVH_PROGRAM.get(NUM_LINES_USE_UBO=1, NUM_LEVELS=BVH_NUM_LEVELS))
-        glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 0, self._lines_buffer)
-        glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 1, self._bvh_buffer)
-        glBindBufferBase(GL_UNIFORM_BUFFER, 2, self._num_lines_buffer)
-        glDispatchCompute(1, 1, 1)
-        glMemoryBarrier(GL_SHADER_STORAGE_BARRIER_BIT)
-
-        with self._filt_direct_lighting_bg_map.bind():
-            glViewport(0, 0, 64 * 8, 64 * 8)
-            glUseProgram(_GEN_DIRECT_LIGHTING_PROGRAM.get(VS_OUTPUT_UV=0))
+        if self._dirty_init_levels:
+            self._dirty_init_levels = False
+            self._dirty_load_level = True
+            glUseProgram(_GEN_MAP_ATLAS_PROGRAM.one())
             glBindBufferBase(GL_UNIFORM_BUFFER, 0, self._global_parameters)
-            glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 1, self._map_atlas_level_data)
-            glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 2, self._bvh_buffer)
-            glBindVertexArray(viewport.get_dummy_vao())
-            glDrawArrays(GL_TRIANGLES, 0, 3)
+            glBindImageTexture(1, self._map_atlas, 0, False, 0, GL_WRITE_ONLY, GL_R32UI)
+            glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 2, self._map_atlas_level_data)
+            glDispatchCompute(1, 1, 8)
+            glMemoryBarrier(GL_SHADER_IMAGE_ACCESS_BARRIER_BIT)
 
-        with self._direct_lighting_bg_map.bind():
-            glViewport(0, 0, 64 * 8, 64 * 8)
-            glUseProgram(_FILTER_DIRECT_LIGHTING_PROGRAM.get(VS_OUTPUT_UV=0))
-            glBindTextureUnit(0, self._filt_direct_lighting_bg_map_v0.texture)
-            glBindTextureUnit(1, self._filt_direct_lighting_bg_map_v1.texture)
-            glBindTextureUnit(2, self._filt_direct_lighting_bg_map_v2.texture)
-            glBindVertexArray(viewport.get_dummy_vao())
-            glDrawArrays(GL_TRIANGLES, 0, 3)
-
-        with self._active_background_map.bind():
-            glViewport(0, 0, 64 * 16, 64 * 16)
-            glUseProgram(_RENDER_MAP_BACKGROUND_PROGRAM.one())
+            glUseProgram(_GEN_PATHFINDING_DIRECTIONS_PROGRAM.one())
             glBindBufferBase(GL_UNIFORM_BUFFER, 0, self._global_parameters)
             glBindImageTexture(1, self._map_atlas, 0, False, 0, GL_READ_ONLY, GL_R32UI)
-            glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 2, self._asset_atlas_data)
-            glBindImageTexture(3, self._asset_atlas_base, 0, False, 0, GL_READ_ONLY, GL_RGBA8)
-            glBindImageTexture(4, self._asset_atlas_norm, 0, False, 0, GL_READ_ONLY, GL_RGBA8)
-            glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 5, self._bvh_buffer)
-            glDrawArrays(GL_TRIANGLES, 0, 64 * 64 * 6)
-        glViewport(0, 0, wnd.width, wnd.height)
+            glBindImageTexture(2, self._pathfinding_directions, 0, False, 0, GL_READ_WRITE, GL_RG32UI)
+            glDispatchCompute(1, 1, 8 * 2)
+            glMemoryBarrier(GL_SHADER_IMAGE_ACCESS_BARRIER_BIT | GL_SHADER_STORAGE_BARRIER_BIT)
+
+            glUseProgram(FINISH_MAP_GEN_PROGRAM.one())
+            glBindBufferBase(GL_UNIFORM_BUFFER, 0, self._global_parameters)
+            glBindImageTexture(1, self._map_atlas, 0, False, 0, GL_READ_ONLY, GL_R32UI)
+            glBindImageTexture(2, self._pathfinding_directions, 0, False, 0, GL_READ_ONLY, GL_RG32UI)
+            glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 3, self._map_atlas_level_data)
+            glDispatchCompute(1, 1, 8)
+            glMemoryBarrier(GL_SHADER_STORAGE_BARRIER_BIT)
+
+            with self._vis_history_fb.bind():
+                glViewport(0, 0, VIS_HISTORY_X, VIS_HISTORY_Y)
+                glUseProgram(_VIS_CLEAR_HISTORY_PROGRAM.get())
+                glBindVertexArray(viewport.get_dummy_vao())
+                glDrawArrays(GL_TRIANGLES, 0, 3)
+
+            glUseProgram(_DRAW_BSP_MAP_DEBUG_PROGRAM.get(VS_OUTPUT_UV=0))
+            glBindTextureUnit(0, self._map_atlas)
+            # glBindTextureUnit(0, self._pathfinding_directions)
+            glBindVertexArray(viewport.get_dummy_vao())
+            glDrawArrays(GL_TRIANGLES, 0, 3)
+
+            glUseProgram(_DEBUG_VIS_PATHFINDING_DIRECTIONS_PROGRAM.one())
+            glBindBufferBase(GL_UNIFORM_BUFFER, 0, self._global_parameters)
+            glBindImageTexture(1, self._map_atlas, 0, False, 0, GL_READ_ONLY, GL_R32UI)
+            glBindImageTexture(2, self._pathfinding_directions, 0, False, 0, GL_READ_ONLY, GL_RG32UI)
+            glUniform2ui(0, self._vis_pf_level, self._vis_pf_room + 1)
+            glDrawArrays(GL_TRIANGLES, 0, ACTIVE_NUM_TILES * ACTIVE_NUM_TILES * 6)
 
 
-        glUseProgram(_DEBUG_TEST_BACKGROUND_NORMALS_PROGRAM.get(
-            VS_OUTPUT_UV=0,
-            ENABLE_SHADOW_CASTING=1
-        ))
+        if self._dirty_load_level:
+            self._dirty_load_level = False
+            # Generate visibility lines
+            glUseProgram(_GEN_MAP_LINES_COMP_PROGRAM.get(OUT_VIS_DISPATCH_ADDR=VIS_DISPATCH_OFFSET))
+            glBindBufferBase(GL_UNIFORM_BUFFER, 0, self._global_parameters)
+            glBindImageTexture(1, self._map_atlas, 0, False, 0, GL_READ_ONLY, GL_R32UI)
+            glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 2, self._num_lines_buffer)
+            glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 3, self._lines_buffer)
+            glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 4, self._indirection_table)
+            glDispatchCompute(1, 1, 1)
+            glMemoryBarrier(GL_UNIFORM_BARRIER_BIT | GL_SHADER_STORAGE_BARRIER_BIT)
+     
+            # Generate BVH
+            glUseProgram(_GENERATE_BVH_PROGRAM.get(NUM_LINES_USE_UBO=1, NUM_LEVELS=BVH_NUM_LEVELS))
+            glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 0, self._lines_buffer)
+            glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 1, self._bvh_buffer)
+            glBindBufferBase(GL_UNIFORM_BUFFER, 2, self._num_lines_buffer)
+            glDispatchCompute(1, 1, 1)
+            glMemoryBarrier(GL_SHADER_STORAGE_BARRIER_BIT)
+
+            with self._filt_direct_lighting_bg_map.bind():
+                glViewport(0, 0, ACTIVE_DIRECT_LIGHTING_SIZE, ACTIVE_DIRECT_LIGHTING_SIZE)
+                glUseProgram(_GEN_DIRECT_LIGHTING_PROGRAM.get(VS_OUTPUT_UV=0))
+                glBindBufferBase(GL_UNIFORM_BUFFER, 0, self._global_parameters)
+                glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 1, self._map_atlas_level_data)
+                glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 2, self._bvh_buffer)
+                glBindVertexArray(viewport.get_dummy_vao())
+                glDrawArrays(GL_TRIANGLES, 0, 3)
+
+            with self._direct_lighting_bg_map.bind():
+                glViewport(0, 0, ACTIVE_DIRECT_LIGHTING_SIZE, ACTIVE_DIRECT_LIGHTING_SIZE)
+                glUseProgram(_FILTER_DIRECT_LIGHTING_PROGRAM.get(VS_OUTPUT_UV=0))
+                glBindTextureUnit(0, self._filt_direct_lighting_bg_map_v0.texture)
+                glBindTextureUnit(1, self._filt_direct_lighting_bg_map_v1.texture)
+                glBindTextureUnit(2, self._filt_direct_lighting_bg_map_v2.texture)
+                glBindVertexArray(viewport.get_dummy_vao())
+                glDrawArrays(GL_TRIANGLES, 0, 3)
+
+            with self._active_background_map.bind():
+                glViewport(0, 0, ACTIVE_BACKGROUND_SIZE, ACTIVE_BACKGROUND_SIZE)
+                glUseProgram(_RENDER_MAP_BACKGROUND_PROGRAM.one())
+                glBindBufferBase(GL_UNIFORM_BUFFER, 0, self._global_parameters)
+                glBindImageTexture(1, self._map_atlas, 0, False, 0, GL_READ_ONLY, GL_R32UI)
+                glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 2, self._asset_atlas_data)
+                glBindImageTexture(3, self._asset_atlas_base, 0, False, 0, GL_READ_ONLY, GL_RGBA8)
+                glBindImageTexture(4, self._asset_atlas_norm, 0, False, 0, GL_READ_ONLY, GL_RGBA8)
+                glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 5, self._bvh_buffer)
+                glDrawArrays(GL_TRIANGLES, 0, ACTIVE_NUM_TILES * ACTIVE_NUM_TILES * 6)
+
+
+        # PLAYING STUFF
+
+        glUseProgram(_DEBUG_SET_PLAYER_POS_PROGRAM.one())
         glBindBufferBase(GL_UNIFORM_BUFFER, 0, self._global_parameters)
-        glBindTextureUnit(1, self._active_background_map_base.texture)
-        glBindTextureUnit(2, self._active_background_map_norm.texture)
-        glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 3, self._bvh_buffer)
-        glBindTextureUnit(4, self._direct_lighting_bg_map_v0.texture)
-        glBindTextureUnit(5, self._direct_lighting_bg_map_v1.texture)
-        glBindTextureUnit(6, self._direct_lighting_bg_map_v2.texture)
+        glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 1, self._player_pos)
         glUniform2f(0, self._mouse_uv[0], 1 - self._mouse_uv[1])
+        glDispatchCompute(1, 1, 1)
+
+        # Initial visibility
+        glViewport(0, 0, ACTIVE_VIS_SIZE, ACTIVE_VIS_SIZE)
+        with self._filt_active_vis_fb.bind():
+            glEnable(GL_STENCIL_TEST)
+            glClear(GL_STENCIL_BUFFER_BIT)
+            glStencilMask(0xFF)
+
+            glStencilOp(GL_KEEP, GL_KEEP, GL_INCR)
+            glStencilFunc(GL_EQUAL, 0, 0xFF)
+            glUseProgram(_VIS_GENERATE_PROGRAM.one())
+            glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 0, self._lines_buffer)
+            glBindBufferBase(GL_UNIFORM_BUFFER, 1, self._player_pos)
+            glBindBuffer(GL_DRAW_INDIRECT_BUFFER, self._indirection_table)
+            glBindVertexArray(viewport.get_dummy_vao())
+            glDrawArraysIndirect(GL_TRIANGLES, c_void_p(VIS_DISPATCH_OFFSET * 4))
+
+            glStencilOp(GL_KEEP, GL_KEEP, GL_KEEP)
+            glUseProgram(_VIS_GENERATE_CLEAR_PROGRAM.one())
+            glBindVertexArray(viewport.get_dummy_vao())
+            glDrawArrays(GL_TRIANGLES, 0, 3)
+
+            glDisable(GL_STENCIL_TEST)
+
+        # Filtering
+        with self._active_vis_fb.bind():
+            glUseProgram(_VIS_FILTER_PROGRAM.get(VS_OUTPUT_UV=0)) 
+            glBindTextureUnit(0, self._filt_active_vis.texture)
+            glBindVertexArray(viewport.get_dummy_vao())
+            glDrawArrays(GL_TRIANGLES, 0, 3)
+
+        # Update history
+        glViewport(0, 0, VIS_HISTORY_X, VIS_HISTORY_Y)
+        with self._vis_history_fb.bind():
+            glEnable(GL_BLEND)
+            glBlendFunc(GL_ONE, GL_ONE)
+            glBlendEquation(GL_MAX)
+            glUseProgram(_VIS_UPDATE_HISTORY_PROGRAM.one())
+            glBindBufferBase(GL_UNIFORM_BUFFER, 0, self._global_parameters) 
+            glBindTextureUnit(1, self._active_vis.texture)
+            glBindVertexArray(viewport.get_dummy_vao())
+            glDrawArrays(GL_TRIANGLES, 0, 6)
+            glDisable(GL_BLEND)
+
+        glViewport(0, 0, wnd.width, wnd.height)
+        glUseProgram(_DEBUG_TEST_BACKGROUND_NORMALS_PROGRAM.get(VS_OUTPUT_UV=0,))
+        glBindBufferBase(GL_UNIFORM_BUFFER, 0, self._global_parameters)
+        glBindBufferBase(GL_UNIFORM_BUFFER, 1, self._player_pos)
+        glBindTextureUnit(2, self._active_background_map_base.texture)
+        glBindTextureUnit(3, self._active_background_map_norm.texture)
+        glBindTextureUnit(4, self._active_vis.texture)
+        glBindTextureUnit(5, self._direct_lighting_bg_map_v0.texture)
+        glBindTextureUnit(6, self._direct_lighting_bg_map_v1.texture)
+        glBindTextureUnit(7, self._direct_lighting_bg_map_v2.texture)
+        glBindTextureUnit(8, self._vis_history.texture)
         glDrawArrays(GL_TRIANGLES, 0, 3)
 
         # Debug draw lines
@@ -449,6 +619,8 @@ class Renderer(object):
         # CTRL-R
         if key == b'\x12':
             viewport.clear_compiled_shaders()
+            self._dirty_load_level = True
+            self._dirty_init_levels = True
             print("RECOMPILIN SHADERS")
             wnd.redraw()
             return
@@ -460,10 +632,12 @@ class Renderer(object):
 
         elif key == b'l':
             self._vis_pf_level = (self._vis_pf_level + 1) & 7
+            self._dirty_load_level = True
             print("Level =", self._vis_pf_level)
         # ctrl+l
         elif key == b'\x0c':
             self._vis_pf_level = 0
+            self._dirty_load_level = True
             print("Level =", self._vis_pf_level)
 
         elif key == b'o':
@@ -476,6 +650,7 @@ class Renderer(object):
 
         elif key == b'c':
             self._n += 1
+            self._dirty_init_levels = True
 
         glDeleteBuffers(1, self._buffers_ptr)
         glCreateBuffers(1, self._buffers_ptr)

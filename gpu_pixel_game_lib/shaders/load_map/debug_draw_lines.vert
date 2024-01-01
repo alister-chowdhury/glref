@@ -8,7 +8,7 @@
 layout(set=0, binding = 0) uniform GlobalParameters_
 {
     GlobalParameters globals;
-}; 
+};
 
 
          layout(binding = 1)         uniform numLines_ { uint numLines; };

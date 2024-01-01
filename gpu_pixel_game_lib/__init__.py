@@ -30,15 +30,26 @@ ASSET_ATLAS_NORM = os.path.join(_ASSETS_DIR, "ATLAS_NORM.png")
 GEN_MAP_ATLAS_COMP = os.path.join(_SHADER_DIR, "initlevels", "gen_map_atlas.comp")
 GEN_PATHFINDING_DIRECTIONS_COMP = os.path.join(_SHADER_DIR, "initlevels", "gen_pathfinding_directions.comp")
 FINISH_MAP_GEN_COMP = os.path.join(_SHADER_DIR, "initlevels", "finish_map_gen.comp")
+VIS_CLEAR_HISTORY_FRAG = os.path.join(_SHADER_DIR, "initlevels", "vis_clear_history.frag")
+
 DEBUG_VIS_PATHFINDING_DIRECTIONS_VERT = os.path.join(_SHADER_DIR, "initlevels", "debug_vis_pathfinding_directions.vert")
 DEBUG_VIS_PATHFINDING_DIRECTIONS_FRAG = os.path.join(_SHADER_DIR, "initlevels", "debug_vis_pathfinding_directions.frag")
 
 RENDER_MAP_BACKGROUND_VERT = os.path.join(_SHADER_DIR, "load_map", "render_background.vert")
 RENDER_MAP_BACKGROUND_FRAG = os.path.join(_SHADER_DIR, "load_map", "render_background.frag")
-DEBUG_TEST_BACKGROUND_NORMALS_FRAG = os.path.join(_SHADER_DIR, "load_map", "debug_test_background_normals.frag")
 GEN_MAP_LINES_COMP = os.path.join(_SHADER_DIR, "load_map", "gen_map_lines.comp")
 GEN_DIRECT_LIGHTING_FRAG = os.path.join(_SHADER_DIR, "load_map", "gen_direct_lighting.frag")
 FILTER_DIRECT_LIGHTING_FRAG = os.path.join(_SHADER_DIR, "load_map", "filter_direct_lighting.frag")
 
 DEBUG_DRAW_LINES_VERT = os.path.join(_SHADER_DIR, "load_map", "debug_draw_lines.vert")
 DEBUG_DRAW_LINES_FRAG = os.path.join(_SHADER_DIR, "load_map", "debug_draw_lines.frag")
+
+
+DEBUG_SET_PLAYER_POS_COMP = os.path.join(_SHADER_DIR, "playing", "debug_set_player_pos.comp")
+VIS_GENERATE_VERT = os.path.join(_SHADER_DIR, "playing", "vis_generate.vert")
+VIS_GENERATE_FRAG = os.path.join(_SHADER_DIR, "playing", "vis_generate.frag")
+VIS_GENERATE_CLEAR_FRAG = os.path.join(_SHADER_DIR, "playing", "vis_generate_clear.frag")
+VIS_FILTER_FRAG = os.path.join(_SHADER_DIR, "playing", "vis_filter.frag")
+VIS_UPDATE_HISTORY_VERT = os.path.join(_SHADER_DIR, "playing", "vis_update_history.vert")
+VIS_UPDATE_HISTORY_FRAG = os.path.join(_SHADER_DIR, "playing", "vis_update_history.frag")
+DEBUG_TEST_BACKGROUND_NORMALS_FRAG = os.path.join(_SHADER_DIR, "playing", "debug_test_background_normals.frag")

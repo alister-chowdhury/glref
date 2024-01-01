@@ -4,7 +4,7 @@
 #include "../map_atlas_common.glsli"
 
 
-layout(location=0) uint tileId;
+layout(location=0) out uint tileId;
 
 void main()
 {

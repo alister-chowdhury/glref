@@ -1,0 +1,24 @@
+#version 460 core
+
+#include "../common.glsli"
+#include "../map_atlas_common.glsli"
+
+layout(local_size_x=1) in;
+
+layout(set=0, binding = 0) uniform GlobalParameters_
+{
+    GlobalParameters globals;
+}; 
+
+writeonly layout(std430, binding = 1) buffer outPlayerPos_ { vec2 outPlayerPos; };
+
+layout(location=0) uniform vec2 screenUV;
+
+
+void main()
+{
+    uint level = globals.currentLevel;
+    MapAtlasLevelInfo atlasInfo = getLevelAtlasInfo(level);
+    float levelToScreenScale = getLevelToBackgroundScale(atlasInfo);
+    outPlayerPos = screenUV * levelToScreenScale;
+}

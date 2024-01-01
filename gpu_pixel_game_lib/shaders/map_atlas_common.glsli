@@ -12,6 +12,8 @@
 #define BACKGROUND_TILE_DIM     MAX_LEVEL_DIM
 
 
+#define VIS_TILE_SIZE   8
+
 // A room value of 0, is unassigned
 #define ATLAS_ROOM_ID_EMPTY     0
 
@@ -131,6 +133,14 @@ float getLevelToBackgroundScale(MapAtlasLevelInfo atlasInfo)
 float getBackgroundToLevelScale(MapAtlasLevelInfo atlasInfo)
 {
     return atlasInfo.inverseSize.x * BACKGROUND_TILE_DIM;
+}
+
+
+vec2 levelUVToAtlasUV(vec2 levelUV, MapAtlasLevelInfo atlasInfo)
+{
+    vec2 offset = vec2(atlasInfo.offset) / vec2(FINAL_ATLAS_WIDTH, FINAL_ATLAS_HEIGHT);
+    vec2 scale = vec2(atlasInfo.size) / vec2(FINAL_ATLAS_WIDTH, FINAL_ATLAS_HEIGHT);
+    return levelUV * scale + offset;
 }
 
 

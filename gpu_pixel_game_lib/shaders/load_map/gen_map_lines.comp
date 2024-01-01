@@ -18,12 +18,13 @@ layout(local_size_x=THREAD_SIZE) in;
 layout(set=0, binding = 0) uniform GlobalParameters_
 {
     GlobalParameters globals;
-}; 
+};
 
 
 readonly layout (r32ui, binding = 1)  uniform uimage2D mapAtlas;
 writeonly layout(std430, binding = 2) buffer outNumLines_ { uint outNumLines; };
 writeonly layout(std430, binding = 3) buffer outLines_ { vec4 outLines[]; };
+writeonly layout(std430, binding = 4) buffer outVisDispatch_ { uint outVisDispatch[]; };
 
 
 shared uint lineAllocator[THREAD_SIZE];
@@ -271,6 +272,7 @@ void main()
     if(tid == (THREAD_SIZE-1))
     {
         outNumLines = offset;
+        outVisDispatch[OUT_VIS_DISPATCH_ADDR] = 9 * offset;
     }
 }
 
