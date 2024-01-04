@@ -100,6 +100,11 @@ _DEBUG_SET_PLAYER_POS_PROGRAM = viewport.make_permutation_program(
     GL_COMPUTE_SHADER = gpu_pixel_game_lib.DEBUG_SET_PLAYER_POS_COMP
 )
 
+_DEBUG_PLAYER_POS_MOVE_TO_PROGRAM = viewport.make_permutation_program(
+    _DEBUGGING,
+    GL_COMPUTE_SHADER = gpu_pixel_game_lib.DEBUG_PLAYER_POS_MOVE_TO_COMP
+)
+
 _VIS_GENERATE_PROGRAM = viewport.make_permutation_program(
     _DEBUGGING,
     GL_VERTEX_SHADER = gpu_pixel_game_lib.VIS_GENERATE_VERT,
@@ -186,6 +191,7 @@ class Renderer(object):
         self._vis_pf_level = 0
         self._vis_pf_room = 0
         self._draw_lines = 1
+        self._debug_set_pos = 1
         self._mouse_uv = (0.5, 0.5)
 
     def run(self):
@@ -572,11 +578,22 @@ class Renderer(object):
 
         # PLAYING STUFF
 
-        glUseProgram(_DEBUG_SET_PLAYER_POS_PROGRAM.one())
-        glBindBufferBase(GL_UNIFORM_BUFFER, 0, self._global_parameters)
-        glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 1, self._player_pos)
-        glUniform2f(0, self._mouse_uv[0], 1 - self._mouse_uv[1])
-        glDispatchCompute(1, 1, 1)
+        if self._debug_set_pos:
+            glUseProgram(_DEBUG_SET_PLAYER_POS_PROGRAM.one())
+            glBindBufferBase(GL_UNIFORM_BUFFER, 0, self._global_parameters)
+            glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 1, self._player_pos)
+            glUniform2f(0, self._mouse_uv[0], 1 - self._mouse_uv[1])
+            glDispatchCompute(1, 1, 1)
+        else:
+            glUseProgram(_DEBUG_PLAYER_POS_MOVE_TO_PROGRAM.one())
+            glBindBufferBase(GL_UNIFORM_BUFFER, 0, self._global_parameters)
+            glBindImageTexture(1, self._map_atlas, 0, False, 0, GL_READ_ONLY, GL_R32UI)
+            glBindImageTexture(2, self._pathfinding_directions, 0, False, 0, GL_READ_ONLY, GL_RG32UI)
+            glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 3, self._player_pos)
+            glUniform2f(0, self._mouse_uv[0], 1 - self._mouse_uv[1])
+            glUniform1f(1, 0.1/64)
+            glDispatchCompute(1, 1, 1)
+            
 
         # Initial visibility
         glViewport(0, 0, ACTIVE_VIS_SIZE, ACTIVE_VIS_SIZE)
@@ -674,6 +691,11 @@ class Renderer(object):
 
         elif key == b'x':
             self._draw_lines ^= 1
+            wnd.redraw()
+            return
+
+        elif key == b'm':
+            self._debug_set_pos ^= 1
             wnd.redraw()
             return
 

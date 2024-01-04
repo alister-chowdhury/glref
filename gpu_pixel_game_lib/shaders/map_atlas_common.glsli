@@ -152,6 +152,13 @@ vec2 levelUVToAtlasUV(vec2 levelUV, MapAtlasLevelInfo atlasInfo)
     return levelUV * scale + offset;
 }
 
+vec2 backgroundUVToAtlasUV(vec2 backgroundUV, MapAtlasLevelInfo atlasInfo)
+{
+    vec2 offset = vec2(atlasInfo.offset) / vec2(FINAL_ATLAS_WIDTH, FINAL_ATLAS_HEIGHT);
+    vec2 scale = vec2(BACKGROUND_TILE_DIM) / vec2(FINAL_ATLAS_WIDTH, FINAL_ATLAS_HEIGHT);
+    return backgroundUV * scale + offset;
+}
+
 
 #define MAP_ATLAS_LEVEL_DATA_NUM_ROOMS_OFFSET   0
 #define MAP_ATLAS_LEVEL_DATA_START_ROOM_OFFSET  1
@@ -216,7 +223,30 @@ bool containsSharedSector(packed_sector_ids_t am0,
                           packed_sector_ids_t am1)
 {
 
-    /// !!!!! NOT YET TESTED !!!!!
+#if 1
+    sector_id_t4 s0 = unpackSectorIds(am0);
+    if(s0.x != ATLAS_ROOM_ID_EMPTY)
+    {
+        if(containsSingleSector(am1, s0.x)) { return true; }
+        if(s0.y != ATLAS_ROOM_ID_EMPTY)
+        {
+            if(containsSingleSector(am1, s0.y)) { return true; }
+            if(s0.z != ATLAS_ROOM_ID_EMPTY)
+            {
+                if(containsSingleSector(am1, s0.z)) { return true; }
+                if(s0.w != ATLAS_ROOM_ID_EMPTY)
+                {
+                    if(containsSingleSector(am1, s0.w)) { return true; }
+                }
+            }
+        }
+    }
+    return false;
+#endif
+
+
+    /// FIXME: This is broken and seems to be returning
+    //         back false positives!!
 
     // Todo: should probably check if branching
     //      num > 1,    evaluate second

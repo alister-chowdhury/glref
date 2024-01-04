@@ -1,0 +1,33 @@
+#version 460 core
+
+#define GLOBAL_PARAMETERS_BINDING       0
+#define MAP_ATLAS_BINDING               1
+#define ROOM_DIRECTION_BINDING          2
+
+#include "../common.glsli"
+#include "../bindings.glsli"
+#include "../map_atlas_common.glsli"
+#include "../pathfinding_common.glsli"
+
+layout(local_size_x=1) in;
+
+layout(std430, binding = 3) buffer rwPlayerPos_ { vec2 rwPlayerPos; };
+
+layout(location=0) uniform vec2  screenUV;
+layout(location=1) uniform float deltaTime;
+
+
+void main()
+{
+    uint level = globals.currentLevel;
+    MapAtlasLevelInfo atlasInfo = getLevelAtlasInfo(level);
+    float levelToScreenScale = getLevelToBackgroundScale(atlasInfo);
+    vec2 targetUV = screenUV * levelToScreenScale;
+
+    vec2 playerPos = rwPlayerPos;
+    playerPos += calcPathfindingDirection(
+        backgroundUVToAtlasUV(playerPos, atlasInfo),
+        backgroundUVToAtlasUV(targetUV, atlasInfo)
+    ) * deltaTime;
+    rwPlayerPos = playerPos;
+}

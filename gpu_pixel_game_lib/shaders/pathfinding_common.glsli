@@ -5,7 +5,9 @@
 // 2 bits per room, (LEFT, UP, RIGHT, DOWN), so when it comes to updating
 // the AI, it's basically O(1).
 // The limitations of this are that we never really know the total distance
+#include "common.glsli"
 #include "bindings.glsli"
+#include "map_atlas_common.glsli"
 
 #define PATHFINDING_LEFT    0
 #define PATHFINDING_DOWN    1
@@ -63,5 +65,58 @@ uint getDirectionToRoom(ivec2 atlasCoord, uint roomId)
     uvec2 mask = imageLoad(roomDirectionsImage, directionCoord).xy;
     return extractDirectionToRoom(mask, roomId);
 }
+
+
+// Requires mapAtlas
+vec2 calcPathfindingDirection(vec2 srcAtlasUV,
+                              vec2 dstAtlasUV)
+{
+    bool smoothDirection = false;
+    vec2 delta = dstAtlasUV - srcAtlasUV;
+    float distSq = dot(delta, delta);
+    if(distSq < 1e-9)
+    {
+        return delta;
+    }
+
+    ivec2 srcCoord = ivec2(srcAtlasUV * vec2(FINAL_ATLAS_WIDTH, FINAL_ATLAS_HEIGHT));
+    ivec2 dstCoord = ivec2(dstAtlasUV * vec2(FINAL_ATLAS_WIDTH, FINAL_ATLAS_HEIGHT));
+
+    packed_sector_ids_t srcPacked = imageLoad(mapAtlas, srcCoord).x;
+    packed_sector_ids_t dstPacked = imageLoad(mapAtlas, dstCoord).x;
+
+    if(!hasAnySectors(srcPacked) || !hasAnySectors(dstPacked))
+    {
+        return vec2(0);
+    }
+    else if(!containsSharedSector(srcPacked, dstPacked))
+    {
+        uint roomId = unpackSectorIds(dstPacked).x;
+        ivec2 direction = decodePathDirection(getDirectionToRoom(srcCoord, roomId));
+        if(smoothDirection)
+        {
+            srcCoord += direction;
+            srcPacked = imageLoad(mapAtlas, srcCoord).x;
+            if(hasAnySectors(srcPacked)
+                && !containsSharedSector(srcPacked, dstPacked))
+            {
+                ivec2 newDirecton = direction
+                                  + decodePathDirection(getDirectionToRoom(srcCoord, roomId));
+
+                if(newDirecton.x != 0 && newDirecton.y != 0)
+                {
+                    direction = newDirecton;
+                }
+            }
+        }
+
+        delta = vec2(direction);
+        distSq = dot(delta, delta);
+    }
+
+    delta *= inversesqrt(distSq);
+    return delta;
+}
+
 
 #endif // PATHFINDING_COMMON_GLSLI
