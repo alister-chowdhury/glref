@@ -61,6 +61,12 @@ _RENDER_MAP_BACKGROUND_PROGRAM = viewport.make_permutation_program(
     GL_FRAGMENT_SHADER = gpu_pixel_game_lib.RENDER_MAP_BACKGROUND_FRAG
 )
 
+_GEN_DISTANCE_FIELD_PROGRAM = viewport.make_permutation_program(
+    _DEBUGGING,
+    GL_VERTEX_SHADER = _DRAW_FULL_SCREEN_PATH,
+    GL_FRAGMENT_SHADER = gpu_pixel_game_lib.GEN_DISTANCE_FIELD_FRAG
+)
+
 _GEN_MAP_LINES_COMP_PROGRAM = viewport.make_permutation_program(
     _DEBUGGING,
     GL_COMPUTE_SHADER = gpu_pixel_game_lib.GEN_MAP_LINES_COMP
@@ -124,6 +130,12 @@ _DEBUG_TEST_BACKGROUND_NORMALS_PROGRAM = viewport.make_permutation_program(
     GL_FRAGMENT_SHADER = gpu_pixel_game_lib.DEBUG_TEST_BACKGROUND_NORMALS_FRAG
 )
 
+_DEBUG_TEST_DF_PROGRAM = viewport.make_permutation_program(
+    _DEBUGGING,
+    GL_VERTEX_SHADER = _DRAW_FULL_SCREEN_PATH,
+    GL_FRAGMENT_SHADER = gpu_pixel_game_lib.DEBUG_TEST_DF_FRAG
+)
+
 
 LEVEL_TILES_X = 128
 LEVEL_TILES_Y = 128
@@ -135,11 +147,13 @@ VIS_HISTORY_Y = LEVEL_TILES_Y * VIS_BUFFER_TILE_SIZE
 
 ACTIVE_NUM_TILES = 64
 BACKGROUND_TILE_SIZE = 16
+DF_TILE_SIZE = 4
 DIRECT_LIGHTING_TILE_SIZE = 8
 
 ACTIVE_BACKGROUND_SIZE = ACTIVE_NUM_TILES * BACKGROUND_TILE_SIZE
 ACTIVE_DIRECT_LIGHTING_SIZE = ACTIVE_NUM_TILES * DIRECT_LIGHTING_TILE_SIZE
 ACTIVE_VIS_SIZE = ACTIVE_NUM_TILES * VIS_BUFFER_TILE_SIZE
+ACTIVE_DF_SIZE = ACTIVE_NUM_TILES * DF_TILE_SIZE
 
 MAX_LINES = 512
 BVH_NUM_LEVELS = 3
@@ -248,6 +262,20 @@ class Renderer(object):
             (self._active_background_map_base, self._active_background_map_norm),
             ACTIVE_BACKGROUND_SIZE,
             ACTIVE_BACKGROUND_SIZE
+        )
+
+
+        self._df_bg_map = viewport.FramebufferTarget(
+            GL_R16F,
+            True,
+            custom_texture_settings=lininterp_texture_settings
+        )
+        self._df_bg_map_fb = viewport.Framebuffer(
+            (
+                self._df_bg_map,
+            ),
+            ACTIVE_DF_SIZE,
+            ACTIVE_DF_SIZE
         )
 
 
@@ -505,6 +533,13 @@ class Renderer(object):
             glDispatchCompute(1, 1, 1)
             glMemoryBarrier(GL_SHADER_STORAGE_BARRIER_BIT)
 
+            with self._df_bg_map_fb.bind():
+                glViewport(0, 0, ACTIVE_DF_SIZE, ACTIVE_DF_SIZE)
+                glUseProgram(_GEN_DISTANCE_FIELD_PROGRAM.get(VS_OUTPUT_UV=0))
+                glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 0, self._bvh_buffer)
+                glBindVertexArray(viewport.get_dummy_vao())
+                glDrawArrays(GL_TRIANGLES, 0, 3)
+
             with self._filt_direct_lighting_bg_map.bind():
                 glViewport(0, 0, ACTIVE_DIRECT_LIGHTING_SIZE, ACTIVE_DIRECT_LIGHTING_SIZE)
                 glUseProgram(_GEN_DIRECT_LIGHTING_PROGRAM.get(VS_OUTPUT_UV=0))
@@ -531,7 +566,7 @@ class Renderer(object):
                 glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 2, self._asset_atlas_data)
                 glBindImageTexture(3, self._asset_atlas_base, 0, False, 0, GL_READ_ONLY, GL_RGBA8)
                 glBindImageTexture(4, self._asset_atlas_norm, 0, False, 0, GL_READ_ONLY, GL_RGBA8)
-                glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 5, self._bvh_buffer)
+                glBindTextureUnit(5, self._df_bg_map.texture)
                 glDrawArrays(GL_TRIANGLES, 0, ACTIVE_NUM_TILES * ACTIVE_NUM_TILES * 6)
 
 
@@ -598,6 +633,18 @@ class Renderer(object):
         glBindTextureUnit(7, self._direct_lighting_bg_map_v2.texture)
         glBindTextureUnit(8, self._vis_history.texture)
         glDrawArrays(GL_TRIANGLES, 0, 3)
+
+        # Draw df hits (use df for weapon hitting)
+        if False:
+            glEnable(GL_BLEND)
+            glBlendFunc(GL_ONE, GL_ONE_MINUS_SRC_ALPHA)
+            glBlendEquation(GL_FUNC_ADD)
+            glUseProgram(_DEBUG_TEST_DF_PROGRAM.get(VS_OUTPUT_UV=0,))
+            glBindBufferBase(GL_UNIFORM_BUFFER, 0, self._global_parameters)
+            glBindBufferBase(GL_UNIFORM_BUFFER, 1, self._player_pos)
+            glBindTextureUnit(2, self._df_bg_map.texture)
+            glDrawArrays(GL_TRIANGLES, 0, 3)
+            glDisable(GL_BLEND)
 
         # Debug draw lines
         if self._draw_lines != 0:

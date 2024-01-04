@@ -35,6 +35,7 @@ VIS_CLEAR_HISTORY_FRAG = os.path.join(_SHADER_DIR, "initlevels", "vis_clear_hist
 DEBUG_VIS_PATHFINDING_DIRECTIONS_VERT = os.path.join(_SHADER_DIR, "initlevels", "debug_vis_pathfinding_directions.vert")
 DEBUG_VIS_PATHFINDING_DIRECTIONS_FRAG = os.path.join(_SHADER_DIR, "initlevels", "debug_vis_pathfinding_directions.frag")
 
+GEN_DISTANCE_FIELD_FRAG = os.path.join(_SHADER_DIR, "load_map", "gen_distance_field.frag")
 RENDER_MAP_BACKGROUND_VERT = os.path.join(_SHADER_DIR, "load_map", "render_background.vert")
 RENDER_MAP_BACKGROUND_FRAG = os.path.join(_SHADER_DIR, "load_map", "render_background.frag")
 GEN_MAP_LINES_COMP = os.path.join(_SHADER_DIR, "load_map", "gen_map_lines.comp")
@@ -53,3 +54,4 @@ VIS_FILTER_FRAG = os.path.join(_SHADER_DIR, "playing", "vis_filter.frag")
 VIS_UPDATE_HISTORY_VERT = os.path.join(_SHADER_DIR, "playing", "vis_update_history.vert")
 VIS_UPDATE_HISTORY_FRAG = os.path.join(_SHADER_DIR, "playing", "vis_update_history.frag")
 DEBUG_TEST_BACKGROUND_NORMALS_FRAG = os.path.join(_SHADER_DIR, "playing", "debug_test_background_normals.frag")
+DEBUG_TEST_DF_FRAG = os.path.join(_SHADER_DIR, "playing", "debug_df_tracing.frag")

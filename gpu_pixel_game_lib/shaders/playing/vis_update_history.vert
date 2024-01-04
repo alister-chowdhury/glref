@@ -20,8 +20,8 @@ void main()
     uvec2 offset = atlasInfo.offset;
     uvec2 size = atlasInfo.size;
 
-    sourceCord = vec2((quadId & 1) == 0 ? 0 : size.x * VIS_TILE_SIZE,
-                      (quadId & 2) == 0 ? 0 : size.y * VIS_TILE_SIZE);
+    sourceCord = vec2((quadId & 1) == 0 ? 0 : size.x * VIS_BUFFER_TILE_SIZE,
+                      (quadId & 2) == 0 ? 0 : size.y * VIS_BUFFER_TILE_SIZE);
 
     // mul by VIS_TILE_SIZE is not needed, since it'll be normalised
     uvec2 dstCoord = offset + uvec2((quadId & 1) == 0 ? 0 : size.x,

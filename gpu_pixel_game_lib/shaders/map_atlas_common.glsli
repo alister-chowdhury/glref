@@ -8,11 +8,20 @@
 #define FINAL_ATLAS_HEIGHT  128
 #define MAX_LEVEL_DIM       64
 
+#define BACKGROUND_TILE_DIM             MAX_LEVEL_DIM
 
-#define BACKGROUND_TILE_DIM     MAX_LEVEL_DIM
+#define BACKGROUND_TILE_SIZE            16
+#define DF_TILE_SIZE                    4
+#define VIS_BUFFER_TILE_SIZE            8
+#define DIRECT_LIGHTING_TILE_SIZE       8
 
+#define VIS_HISTORY_X                   (FINAL_ATLAS_WIDTH * VIS_BUFFER_TILE_SIZE)
+#define VIS_HISTORY_Y                   LEVEL_TILES_Y * VIS_BUFFER_TILE_SIZE
 
-#define VIS_TILE_SIZE   8
+#define ACTIVE_BACKGROUND_SIZE          (BACKGROUND_TILE_DIM * BACKGROUND_TILE_SIZE)
+#define ACTIVE_DIRECT_LIGHTING_SIZE     (BACKGROUND_TILE_DIM * DIRECT_LIGHTING_TILE_SIZE)
+#define ACTIVE_VIS_SIZE                 (BACKGROUND_TILE_DIM * VIS_BUFFER_TILE_SIZE)
+#define ACTIVE_DF_SIZE                  (BACKGROUND_TILE_DIM * DF_TILE_SIZE)
 
 // A room value of 0, is unassigned
 #define ATLAS_ROOM_ID_EMPTY     0

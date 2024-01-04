@@ -1,6 +1,7 @@
 #version 460 core
 
 #include "../common.glsli"
+#include "../map_atlas_common.glsli"
 
 layout(binding=0) uniform sampler2D directLightingV0;
 layout(binding=1) uniform sampler2D directLightingV1;
@@ -19,9 +20,7 @@ void main()
     vec2 accumV2 = vec2(0);
     float weight = 0.0;
 
-    // We know the exact size of this, swap it out
-    // when we're sure everything is fine.
-    vec2 duv = vec2(dFdx(uv.x), dFdy(uv.y));
+    vec2 duv = vec2(1.0/ACTIVE_DIRECT_LIGHTING_SIZE);
 
     for(float dX=-1; dX<=1; ++dX)
     for(float dY=-1; dY<=1; ++dY)

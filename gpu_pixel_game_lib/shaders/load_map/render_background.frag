@@ -2,10 +2,8 @@
 
 #include "../map_atlas_common.glsli"
 
-#define LINE_BVH_V2_STACK_SIZE 9
-#define LINE_BVH_V2_BINDING 5
-// #include "../../../shaders/grid_based_bvh/v2_tracing.glsli"
-#include "../v2_tracing.glsli"
+#define DF_TEXTURE_BINDING 5
+#include "../df_tracing.glsli"
 
 readonly layout(binding=3, rgba8) uniform image2D assetBaseAtlas;
 readonly layout(binding=4, rgba8) uniform image2D assetNormAtlas;
@@ -19,10 +17,9 @@ void main()
 {
     ivec2 coord = ivec2(pixelCoordAndHeight.xy);
 
-    // Raycast from the base of walls, rather than the
+    // Sample from the base of walls, rather than the
     // line itself.
-    float AO = findNearestDistanceBvhV2(uv + vec2(0, 0.5 / BACKGROUND_TILE_DIM),
-                                        1.0);
+    float AO = df_sample(uv + vec2(0, 0.5 / BACKGROUND_TILE_DIM));
     AO = (sqrt(AO) * 5.0 + 0.4);
     AO = clamp(AO, 0.0, 1.0);
 

@@ -1,0 +1,56 @@
+#ifndef DF_COMMON_GLSLI
+#define DF_COMMON_GLSLI
+
+#include "map_atlas_common.glsli"
+
+#ifndef DF_TEXTURE_BINDING
+#define DF_TEXTURE_BINDING 20
+#endif // DF_TEXTURE_BINDING
+
+layout(binding=DF_TEXTURE_BINDING) uniform sampler2D distanceFieldTexture;
+
+struct DFTraceResult
+{
+    bool    visible;
+    int     numSamples;
+    float   finalDist;
+};
+
+
+float df_sample(vec2 ro)
+{
+    return textureLod(distanceFieldTexture, ro, 0).x;
+}
+
+DFTraceResult df_trace(vec2 ro, vec2 rd, float maxDist)
+{
+    const int maxSteps = 128;
+    float bias = 0.5 / ACTIVE_DF_SIZE;
+    float dist = maxDist;
+
+    bool visible = false;
+    int i = 0;
+    for(; i < maxSteps; ++i)
+    {
+        float d = df_sample(ro) * 0.95;
+        if(d < bias)
+        {
+            break;
+        }
+        dist -= d;
+        if(dist <= 0)
+        {
+            visible = true;
+            break;
+        }
+        ro += rd * d;
+    }
+
+    DFTraceResult result;
+    result.visible =  visible;
+    result.numSamples = i;
+    result.finalDist = maxDist - dist;
+    return result;
+}
+
+#endif // DF_COMMON_GLSLI
