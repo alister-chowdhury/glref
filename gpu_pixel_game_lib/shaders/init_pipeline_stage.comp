@@ -3,6 +3,8 @@
 layout(local_size_x=32) in;
 
 
+#error todo
+
 #include "common.glsli"
 
 

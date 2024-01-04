@@ -1,13 +1,8 @@
 #ifndef DF_COMMON_GLSLI
 #define DF_COMMON_GLSLI
 
+#include "bindings.glsli"
 #include "map_atlas_common.glsli"
-
-#ifndef DF_TEXTURE_BINDING
-#define DF_TEXTURE_BINDING 20
-#endif // DF_TEXTURE_BINDING
-
-layout(binding=DF_TEXTURE_BINDING) uniform sampler2D distanceFieldTexture;
 
 struct DFTraceResult
 {

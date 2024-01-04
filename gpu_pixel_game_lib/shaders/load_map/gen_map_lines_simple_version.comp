@@ -1,22 +1,16 @@
 #version 460 core
 
+#define GLOBAL_PARAMETERS_BINDING       0
+#define MAP_ATLAS_BINDING               1
 #include "../common.glsli"
+#include "../bindings.glsli"
 #include "../map_atlas_common.glsli"
-
 
 #define THREAD_SIZE     MAX_LEVEL_DIM
 #define INVALID_OFFSET  -0x7ffffff
 
 layout(local_size_x=THREAD_SIZE) in;
 
-
-layout(set=0, binding = 0) uniform GlobalParameters_
-{
-    GlobalParameters globals;
-}; 
-
-
-readonly layout (r32ui, binding = 1)  uniform uimage2D mapAtlas;
 writeonly layout(std430, binding = 2) buffer outNumLines_ { uint outNumLines; };
 writeonly layout(std430, binding = 3) buffer outLines_ { vec4 outLines[]; };
 

@@ -1,15 +1,12 @@
 #version 460 core
 
+#define GLOBAL_PARAMETERS_BINDING       0
+#define DF_TEXTURE_BINDING              2
 #include "../common.glsli"
+#include "../bindings.glsli"
 #include "../map_atlas_common.glsli"
-
-#define DF_TEXTURE_BINDING 2
 #include "../df_tracing.glsli"
 
-layout(set=0, binding = 0) uniform GlobalParameters_
-{
-    GlobalParameters globals;
-};
 
 layout(set=0, binding = 1) uniform playerPos_
 {

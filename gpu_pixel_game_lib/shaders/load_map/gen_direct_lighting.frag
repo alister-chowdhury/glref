@@ -1,24 +1,14 @@
 #version 460 core
 
 
-// Swap this out to maybe use circular shadow mapping
-// this can get quite expensive at the higher levels.
-
+#define GLOBAL_PARAMETERS_BINDING       0
+#define MAP_ATLAS_DATA_BINDING          1
+#define LINE_BVH_V2_BINDING             2
 #include "../common.glsli"
+#include "../bindings.glsli"
 #include "../map_atlas_common.glsli"
 #include "../ch_common.glsli"
-
-#define LINE_BVH_V2_STACK_SIZE 9
-#define LINE_BVH_V2_BINDING 2
 #include "../v2_tracing.glsli"
-
-
-layout(set=0, binding = 0) uniform GlobalParameters_
-{
-    GlobalParameters globals;
-}; 
-
-readonly layout(std430, binding = 1) buffer mapAtlasData_ { uint mapAtlasData[]; };
 
 layout(location=0) in vec2  uv;
 

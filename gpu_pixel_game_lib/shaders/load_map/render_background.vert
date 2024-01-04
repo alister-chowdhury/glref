@@ -4,18 +4,13 @@
 
 #define ASSET_ATLAS_TILE_VARIANTS   8
 
-
+#define GLOBAL_PARAMETERS_BINDING       0
+#define MAP_ATLAS_BINDING               1
+#define ASSET_ATLAS_BINDING             2
 #include "../common.glsli"
+#include "../bindings.glsli"
 #include "../map_atlas_common.glsli"
 #include "../../assets/ASSET_ATLAS.glsl"
-
-layout(set=0, binding = 0) uniform GlobalParameters_
-{
-    GlobalParameters globals;
-}; 
-
-readonly layout(binding=1, r32ui)    uniform uimage2D mapAtlas;
-readonly layout(binding=2)           buffer assetAtlasBuffer_ { uvec4 assetAtlasBuffer[];};
 
 layout(location=0) out vec3 pixelCoordAndHeight;
 layout(location=1) out vec2 uv;

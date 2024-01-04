@@ -5,12 +5,7 @@
 // 2 bits per room, (LEFT, UP, RIGHT, DOWN), so when it comes to updating
 // the AI, it's basically O(1).
 // The limitations of this are that we never really know the total distance
-
-#ifndef ROOM_DIRECTION_BINDING
-#define ROOM_DIRECTION_BINDING 20
-#endif // ROOM_DIRECTION_BINDING
-
-readonly layout(binding=2, rg32ui)   uniform uimage2D roomDirectionsImage;
+#include "bindings.glsli"
 
 #define PATHFINDING_LEFT    0
 #define PATHFINDING_DOWN    1

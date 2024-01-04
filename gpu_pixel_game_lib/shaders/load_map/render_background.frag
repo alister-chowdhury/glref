@@ -1,8 +1,7 @@
 #version 460 core
 
-#include "../map_atlas_common.glsli"
-
 #define DF_TEXTURE_BINDING 5
+#include "../map_atlas_common.glsli"
 #include "../df_tracing.glsli"
 
 readonly layout(binding=3, rgba8) uniform image2D assetBaseAtlas;

@@ -1,15 +1,9 @@
 #version 460 core
 
-
+#define GLOBAL_PARAMETERS_BINDING       0
 #include "../common.glsli"
+#include "../bindings.glsli"
 #include "../map_atlas_common.glsli"
-
-
-layout(set=0, binding = 0) uniform GlobalParameters_
-{
-    GlobalParameters globals;
-};
-
 
          layout(binding = 1)         uniform numLines_ { uint numLines; };
 readonly layout(std430, binding = 2) buffer lines_     { vec4 lines[]; };

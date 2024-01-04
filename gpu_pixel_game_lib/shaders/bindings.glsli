@@ -3,6 +3,8 @@
 
 #include "common.glsli"
 
+// This houses common bindings, to make it easier to
+// interop functionality between systems.
 
 #ifndef GLOBAL_PARAMETERS_BINDING
 #define GLOBAL_PARAMETERS_BINDING 15
@@ -12,22 +14,40 @@ layout(binding = GLOBAL_PARAMETERS_BINDING) uniform GlobalParameters_
     GlobalParameters globals;
 };
 
+#ifndef NEXT_GLOBAL_PARAMETERS_BINDING
+#define NEXT_GLOBAL_PARAMETERS_BINDING 16
+#endif // GLOBAL_PARAMETERS_BINDING
+layout(std430, binding = NEXT_GLOBAL_PARAMETERS_BINDING) buffer nextGlobals_ { uint nextGlobals[]; };
 
 #ifndef MAP_ATLAS_BINDING
-#define MAP_ATLAS_BINDING 16
-readonly layout(binding=MAP_ATLAS_BINDING, r32ui) uniform uimage2D mapAtlas;
+#define MAP_ATLAS_BINDING 17
 #endif // MAP_ATLAS_BINDING
+readonly layout(binding=MAP_ATLAS_BINDING, r32ui) uniform uimage2D mapAtlas;
 
+#ifndef ROOM_DIRECTION_BINDING
+#define ROOM_DIRECTION_BINDING 18
+#endif // ROOM_DIRECTION_BINDING
+readonly layout(binding=ROOM_DIRECTION_BINDING, rg32ui)   uniform uimage2D roomDirectionsImage;
+
+#ifndef MAP_ATLAS_DATA_BINDING
+#define MAP_ATLAS_DATA_BINDING 19
+#endif // MAP_ATLAS_DATA_BINDING
+readonly layout(std430, binding=MAP_ATLAS_DATA_BINDING) buffer mapAtlasData_ { uint mapAtlasData[]; };
 
 #ifndef LINE_BVH_V2_BINDING
 #define LINE_BVH_V2_BINDING 20
 #endif // LINE_BVH_V2_BINDING
-readonly  layout(std430, binding = LINE_BVH_V2_BINDING) buffer v2LinesBvh_ { vec4 v2LinesBvh[]; };
+readonly  layout(std430, binding=LINE_BVH_V2_BINDING) buffer v2LinesBvh_ { vec4 v2LinesBvh[]; };
 
 #ifndef DF_TEXTURE_BINDING
 #define DF_TEXTURE_BINDING 21
 #endif // DF_TEXTURE_BINDING
 layout(binding=DF_TEXTURE_BINDING) uniform sampler2D distanceFieldTexture;
+
+#ifndef ASSET_ATLAS_BINDING
+#define ASSET_ATLAS_BINDING 22
+#endif // ASSET_ATLAS_BINDING
+readonly layout(binding=ASSET_ATLAS_BINDING) buffer assetAtlasBuffer_ { uvec4 assetAtlasBuffer[];};
 
 
 #endif // BINDINGS_GLSLI

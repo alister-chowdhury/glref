@@ -1,19 +1,16 @@
 #ifndef LINE_BVH_V2_TRACING_GLSLI
 #define LINE_BVH_V2_TRACING_GLSLI
 
+#include "bindings.glsli"
 
 // Should be like log2(num_buckets) + 1 for maximum occupancy
 #ifndef LINE_BVH_V2_STACK_SIZE
-#define LINE_BVH_V2_STACK_SIZE 16
+#define LINE_BVH_V2_STACK_SIZE 9
 #endif // LINE_BVH_V2_STACK_SIZE
 
 #ifndef LINE_BVH_V2_FORCE_FULL_TRAVERSAL
 #define LINE_BVH_V2_FORCE_FULL_TRAVERSAL 0
 #endif // LINE_BVH_V2_FORCE_FULL_TRAVERSAL
-
-
-readonly  layout(std430, binding = LINE_BVH_V2_BINDING) buffer v2LinesBvh_ { vec4 v2LinesBvh[]; };
-
 
 #define LINE_BVH_V2_BBOX_TYPE           0
 #define LINE_BVH_V2_LINE_BUCKET_TYPE    1

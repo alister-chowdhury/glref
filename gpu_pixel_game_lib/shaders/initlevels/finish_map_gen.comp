@@ -1,23 +1,16 @@
 #version 460 core
 
-#define ROOM_DIRECTION_BINDING  2
-
+#define GLOBAL_PARAMETERS_BINDING       0
+#define MAP_ATLAS_BINDING               1
+#define ROOM_DIRECTION_BINDING          2
 #include "../common.glsli"
+#include "../bindings.glsli"
 #include "../map_atlas_common.glsli"
 #include "../pathfinding_common.glsli"
 
 layout(local_size_x=MAX_ROOMS) in;
 
-
-layout(set=0, binding = 0) uniform GlobalParameters_
-{
-    GlobalParameters globals;
-}; 
-
-
-readonly layout(binding=1, r32ui)    uniform uimage2D mapAtlas;
-layout(std430, binding = 3) buffer mapAtlasData_ { uint mapAtlasData[]; };
-
+layout(std430, binding = 3) buffer rwMapAtlasData_ { uint rwMapAtlasData[]; };
 
 shared uint  pickRoomsNumSteps[MAX_ROOMS];
 
@@ -63,7 +56,7 @@ void pickStartEndRooms(uint tid, uint levelId, MapAtlasLevelInfo atlasInfo)
     // Approximatly find whichever two rooms are furthest away from each other
 
     uint levelDataOffset = levelId * MAP_ATLAS_LEVEL_DATA_STRIDE;
-    uint numRooms = mapAtlasData[levelDataOffset + MAP_ATLAS_LEVEL_DATA_NUM_ROOMS_OFFSET];
+    uint numRooms = rwMapAtlasData[levelDataOffset + MAP_ATLAS_LEVEL_DATA_NUM_ROOMS_OFFSET];
 
     uint idx0 = 0u;
     uint idx1 = 0u;
@@ -71,14 +64,14 @@ void pickStartEndRooms(uint tid, uint levelId, MapAtlasLevelInfo atlasInfo)
     for(int i=0; i<4; ++i)
     {
         idx1 = idx0;
-        ivec4 entryStart = unpackSpan(mapAtlasData[levelDataOffset + MAP_ATLAS_LEVEL_DATA_ROOM_SPANS_OFFSET + idx1]);
+        ivec4 entryStart = unpackSpan(rwMapAtlasData[levelDataOffset + MAP_ATLAS_LEVEL_DATA_ROOM_SPANS_OFFSET + idx1]);
         idx0 = findFurthestRoom(tid, numRooms, entryStart, atlasInfo);
     }
 
     if(tid == 0)
     {
-        mapAtlasData[levelDataOffset + MAP_ATLAS_LEVEL_DATA_START_ROOM_OFFSET] = idx0 + 1;
-        mapAtlasData[levelDataOffset + MAP_ATLAS_LEVEL_DATA_END_ROOM_OFFSET] = idx1 + 1;
+        rwMapAtlasData[levelDataOffset + MAP_ATLAS_LEVEL_DATA_START_ROOM_OFFSET] = idx0 + 1;
+        rwMapAtlasData[levelDataOffset + MAP_ATLAS_LEVEL_DATA_END_ROOM_OFFSET] = idx1 + 1;
     }
     barrier();
 }

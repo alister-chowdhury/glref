@@ -2,15 +2,12 @@
 
 // dispatch GL_TRIANGLES, 128*128*6
 
-
-#define ROOM_DIRECTION_BINDING  2
-
+#define MAP_ATLAS_BINDING               1
+#define ROOM_DIRECTION_BINDING          2
 #include "../common.glsli"
+#include "../bindings.glsli"
 #include "../map_atlas_common.glsli"
 #include "../pathfinding_common.glsli"
-
-
-readonly layout(binding=1, r32ui)    uniform uimage2D mapAtlas;
 
 layout(location=0) uniform uvec2 targetLevelAndRoom;
 layout(location=0) out vec2 outShapeNdc;

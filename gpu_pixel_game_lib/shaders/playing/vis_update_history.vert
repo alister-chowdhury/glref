@@ -1,12 +1,10 @@
 #version 460 core
 
+#define GLOBAL_PARAMETERS_BINDING       0
 #include "../common.glsli"
+#include "../bindings.glsli"
 #include "../map_atlas_common.glsli"
 
-layout(set=0, binding = 0) uniform GlobalParameters_
-{
-    GlobalParameters globals;
-};
 
 layout(location=0) out vec2  sourceCord;
 

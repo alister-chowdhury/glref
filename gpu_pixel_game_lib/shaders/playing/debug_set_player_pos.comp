@@ -1,14 +1,11 @@
 #version 460 core
 
+#define GLOBAL_PARAMETERS_BINDING       0
 #include "../common.glsli"
+#include "../bindings.glsli"
 #include "../map_atlas_common.glsli"
 
 layout(local_size_x=1) in;
-
-layout(set=0, binding = 0) uniform GlobalParameters_
-{
-    GlobalParameters globals;
-}; 
 
 writeonly layout(std430, binding = 1) buffer outPlayerPos_ { vec2 outPlayerPos; };
 

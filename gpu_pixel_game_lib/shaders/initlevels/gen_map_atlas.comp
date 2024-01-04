@@ -4,22 +4,16 @@
 #define NUM_THREADS     64
 #define MAX_PATHS       (MAX_ROOMS - 1)
 
-
-layout(local_size_x=NUM_THREADS) in;
-
-
+#define GLOBAL_PARAMETERS_BINDING       0
 #include "../common.glsli"
+#include "../bindings.glsli"
 #include "../map_atlas_common.glsli"
 
 
-layout(set=0, binding = 0) uniform GlobalParameters_
-{
-    GlobalParameters globals;
-}; 
+layout(local_size_x=NUM_THREADS) in;
 
-
-writeonly layout(binding=1, r32ui) uniform uimage2D mapAtlas;
-writeonly layout(std430, binding = 2) buffer mapAtlasData_ { uint mapAtlasData[]; };
+writeonly layout(binding=1, r32ui) uniform uimage2D rwMapAtlas;
+writeonly layout(std430, binding = 2) buffer rwMapAtlasData_ { uint rwMapAtlasData[]; };
 
 
 // Uses the last 23bits to construct a linear range
@@ -247,7 +241,7 @@ void renderBsp(uint tid, MapAtlasLevelInfo atlasInfo)
 
         if((localCoord.x < atlasInfo.size.x && localCoord.y < atlasInfo.size.y))
         {
-            imageStore(mapAtlas,
+            imageStore(rwMapAtlas,
                            ivec2(atlasInfo.offset + localCoord),
                            uvec4(pixelId));
         }
@@ -278,14 +272,14 @@ void generateMapAtlasData(uint tid, uint levelId)
 
     if(tid == 0u)
     {
-        mapAtlasData[levelDataOffset + MAP_ATLAS_LEVEL_DATA_NUM_ROOMS_OFFSET] = numRooms;
-        mapAtlasData[levelDataOffset + MAP_ATLAS_LEVEL_DATA_START_ROOM_OFFSET] = 0u;
-        mapAtlasData[levelDataOffset + MAP_ATLAS_LEVEL_DATA_END_ROOM_OFFSET] = 0u;
+        rwMapAtlasData[levelDataOffset + MAP_ATLAS_LEVEL_DATA_NUM_ROOMS_OFFSET] = numRooms;
+        rwMapAtlasData[levelDataOffset + MAP_ATLAS_LEVEL_DATA_START_ROOM_OFFSET] = 0u;
+        rwMapAtlasData[levelDataOffset + MAP_ATLAS_LEVEL_DATA_END_ROOM_OFFSET] = 0u;
     }
 
     if(evaluateRoomId != 0xffffffffu)
     {
-        mapAtlasData[levelDataOffset + MAP_ATLAS_LEVEL_DATA_ROOM_SPANS_OFFSET + evaluateRoomId] = roomPackedSpan;
+        rwMapAtlasData[levelDataOffset + MAP_ATLAS_LEVEL_DATA_ROOM_SPANS_OFFSET + evaluateRoomId] = roomPackedSpan;
     }
 }
 

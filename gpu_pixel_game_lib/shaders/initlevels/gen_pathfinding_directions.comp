@@ -10,25 +10,18 @@
 // reliably solved all possible paths.
 #define NUM_FLOOD_FILL_ITERS    128
 
-
 #define HALF_MAX_LEVEL_DIM_SHARED_SIZE (MAX_LEVEL_DIM_SHARED_SIZE/2)
 
-layout(local_size_x=NUM_THREADS) in;
-
-
+#define GLOBAL_PARAMETERS_BINDING       0
+#define MAP_ATLAS_BINDING               1
 #include "../common.glsli"
+#include "../bindings.glsli"
 #include "../map_atlas_common.glsli"
 #include "../pathfinding_common.glsli"
 
+layout(local_size_x=NUM_THREADS) in;
 
-layout(set=0, binding = 0) uniform GlobalParameters_
-{
-    GlobalParameters globals;
-}; 
-
-
-readonly layout(binding=1, r32ui)    uniform uimage2D mapAtlas;
-         layout(binding=2, rg32ui)   uniform uimage2D roomDirections;
+layout(binding=2, rg32ui)   uniform uimage2D rwRoomDirections;
 
 
 // This shader generates an atlas of directions to travel to get
@@ -109,7 +102,7 @@ void init(uint tid, MapAtlasLevelInfo atlasInfo, int targetUpperBits)
 {
 
     // Initialise the path mask with an initial state of having seen the current room
-    // and clear roomDirections are the relevant locations.
+    // and clear rwRoomDirections are the relevant locations.
     for(uint it = tid; it < (MAX_LEVEL_DIM_SHARED_SIZE * MAX_LEVEL_DIM_SHARED_SIZE); it += NUM_THREADS)
     {
         ivec2 localCoord = ivec2(uvec2(it % MAX_LEVEL_DIM_SHARED_SIZE, it / MAX_LEVEL_DIM_SHARED_SIZE))
@@ -121,7 +114,7 @@ void init(uint tid, MapAtlasLevelInfo atlasInfo, int targetUpperBits)
             ivec2 atlasOffset = ivec2(localCoord + atlasInfo.offset);
             ivec2 dirAtlasOffset = atlasOffset * ivec2(2, 1) + ivec2(targetUpperBits, 0);
 
-            imageStore(roomDirections, dirAtlasOffset, uvec4(0));
+            imageStore(rwRoomDirections, dirAtlasOffset, uvec4(0));
             uint pixelId = imageLoad(mapAtlas, atlasOffset).x;
             pathMask = generatePathMask(pixelId, targetUpperBits);
         }
@@ -234,8 +227,8 @@ void directFloorColumn(uint tid,
                 ivec2 atlasOffset = coord + ivec2(atlasInfo.offset + MAX_LEVEL_DIM_SHARED_OFFSET);
                 ivec2 dirAtlasOffset = atlasOffset * ivec2(2, 1) + ivec2(targetUpperBits, 0);
 
-                updatedDirection |= imageLoad(roomDirections, dirAtlasOffset).xy;
-                imageStore(roomDirections, dirAtlasOffset, updatedDirection.xyxy);
+                updatedDirection |= imageLoad(rwRoomDirections, dirAtlasOffset).xy;
+                imageStore(rwRoomDirections, dirAtlasOffset, updatedDirection.xyxy);
                 roomPathMask[coord.y * MAX_LEVEL_DIM_SHARED_SIZE + coord.x] = updated;
             }
         }
@@ -261,8 +254,8 @@ void directFloorColumn(uint tid,
                 ivec2 atlasOffset = coord + ivec2(atlasInfo.offset + MAX_LEVEL_DIM_SHARED_OFFSET);
                 ivec2 dirAtlasOffset = atlasOffset * ivec2(2, 1) + ivec2(targetUpperBits, 0);
 
-                updatedDirection |= imageLoad(roomDirections, dirAtlasOffset).xy;
-                imageStore(roomDirections, dirAtlasOffset, updatedDirection.xyxy);
+                updatedDirection |= imageLoad(rwRoomDirections, dirAtlasOffset).xy;
+                imageStore(rwRoomDirections, dirAtlasOffset, updatedDirection.xyxy);
                 roomPathMask[coord.y * MAX_LEVEL_DIM_SHARED_SIZE + coord.x] = updated;
             }
         }
@@ -364,8 +357,8 @@ void directionFloorItChecker(uint step,
             ivec2 atlasOffset = ivec2(coord + atlasInfo.offset + MAX_LEVEL_DIM_SHARED_OFFSET);
             ivec2 dirAtlasOffset = atlasOffset * ivec2(2, 1) + ivec2(targetUpperBits, 0);
 
-            updatedDirection |= imageLoad(roomDirections, dirAtlasOffset).xy;
-            imageStore(roomDirections, dirAtlasOffset, updatedDirection.xyxy);
+            updatedDirection |= imageLoad(rwRoomDirections, dirAtlasOffset).xy;
+            imageStore(rwRoomDirections, dirAtlasOffset, updatedDirection.xyxy);
             roomPathMask[coord.y * MAX_LEVEL_DIM_SHARED_SIZE + coord.x] = updated;
         }
 
