@@ -271,7 +271,8 @@ void directFloorColumn(uint tid,
 }
 
 
-void directionFloorItChecker(uint tid,
+void directionFloorItChecker(uint step,
+                             uint tid,
                              MapAtlasLevelInfo atlasInfo,
                              uint validPixelMask, 
                              uint side,
@@ -306,16 +307,57 @@ void directionFloorItChecker(uint tid,
         uvec2 third = uvec2(up, PATHFINDING_UP_MASK);
         uvec2 fourth = uvec2(down, PATHFINDING_DOWN_MASK);
 
-        // if(side == 1u)
-        // {
-        //     uvec2 tmp = first; first = second; second = tmp;
-        //           tmp = third; third = fourth; fourth = tmp;
-        // }
 
+        // Create alternating directions so rather than like
+        //
+        // >>>^<<<
+        // >>>^<<<
+        // >>>^<<<
+        // >>>^<<<
+        //
+        // we get:
+        //
+        // >>>^<<<
+        // >^>^<^<
+        // >^>^<^<
+        // >^>^<^<
+        //
+        // This means AI can walk diagonally if it samples two directions.
+        /// (or even more directly by 4 samples).
+        // We don't do this on the first step, as it can cause weird patterns
+        // to emerge when trying to get to a path (it can still do weird stuff
+        // but it's somewhat less awful).
+        bool alternateSide = (side == 1u) && (step > 0);
+
+        // For what ever reason this seems to break (atleast on INTEL)
+        // I have no idea why, but doing an explicit branch does not. 
+#if 0
+        if(alternateSide)
+        {
+            uvec2 tmp = first; first = second; second = tmp;
+                  tmp = third; third = fourth; fourth = tmp;
+        }
         updateFromNeighbour(first.x & ~updated, updated, updatedDirection, first.y);
         updateFromNeighbour(second.x & ~updated, updated, updatedDirection, second.y);
         updateFromNeighbour(third.x & ~updated, updated, updatedDirection, third.y);
         updateFromNeighbour(fourth.x & ~updated, updated, updatedDirection, fourth.y);
+
+#else
+        if(alternateSide)
+        {
+            updateFromNeighbour(third.x & ~updated, updated, updatedDirection, third.y);
+            updateFromNeighbour(fourth.x & ~updated, updated, updatedDirection, fourth.y);
+            updateFromNeighbour(first.x & ~updated, updated, updatedDirection, first.y);
+            updateFromNeighbour(second.x & ~updated, updated, updatedDirection, second.y);
+        }
+        else
+        {        
+            updateFromNeighbour(first.x & ~updated, updated, updatedDirection, first.y);
+            updateFromNeighbour(second.x & ~updated, updated, updatedDirection, second.y);
+            updateFromNeighbour(third.x & ~updated, updated, updatedDirection, third.y);
+            updateFromNeighbour(fourth.x & ~updated, updated, updatedDirection, fourth.y);
+        }
+#endif
 
         if(updated != self)
         {
@@ -333,10 +375,10 @@ void directionFloorItChecker(uint tid,
 }
 
 
-void directionFloorIt(uint tid, MapAtlasLevelInfo atlasInfo, uvec2 validPixelMask, int targetUpperBits)
+void directionFloorIt(uint i, uint tid, MapAtlasLevelInfo atlasInfo, uvec2 validPixelMask, int targetUpperBits)
 {
-    directionFloorItChecker(tid, atlasInfo, validPixelMask.x, 0u, targetUpperBits);
-    directionFloorItChecker(tid, atlasInfo, validPixelMask.y, 1u, targetUpperBits);
+    directionFloorItChecker(i, tid, atlasInfo, validPixelMask.x, 0u, targetUpperBits);
+    directionFloorItChecker(i, tid, atlasInfo, validPixelMask.y, 1u, targetUpperBits);
 }
 
 
@@ -367,6 +409,6 @@ void main()
 
     for(uint i=0; i<NUM_FLOOD_FILL_ITERS; ++i)
     {
-        directionFloorIt(tid, atlasInfo, validPixelMask, targetUpperBits);
+        directionFloorIt(i, tid, atlasInfo, validPixelMask, targetUpperBits);
     }
 }
