@@ -1,5 +1,7 @@
 #version 460 core
 
+#define ROOM_DIRECTION_BINDING  2
+
 #include "../common.glsli"
 #include "../map_atlas_common.glsli"
 #include "../pathfinding_common.glsli"
@@ -14,7 +16,6 @@ layout(set=0, binding = 0) uniform GlobalParameters_
 
 
 readonly layout(binding=1, r32ui)    uniform uimage2D mapAtlas;
-readonly layout(binding=2, rg32ui)   uniform uimage2D roomDirections;
 layout(std430, binding = 3) buffer mapAtlasData_ { uint mapAtlasData[]; };
 
 
@@ -31,7 +32,7 @@ uint findFurthestRoom(uint tid, uint numRooms, ivec4 entryStart, MapAtlasLevelIn
         while(!containsSingleSector(imageLoad(mapAtlas, currentCoord).x, roomId))
         {
             ++numSteps;
-            uint direction = getDirectionToRoom(roomDirections, currentCoord, roomId);
+            uint direction = getDirectionToRoom(currentCoord, roomId);
             currentCoord += decodePathDirection(direction);
 
             if(numSteps > 0xffff) { break; }

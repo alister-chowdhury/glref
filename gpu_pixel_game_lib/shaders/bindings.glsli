@@ -1,0 +1,33 @@
+#ifndef BINDINGS_GLSLI
+#define BINDINGS_GLSLI
+
+#include "common.glsli"
+
+
+#ifndef GLOBAL_PARAMETERS_BINDING
+#define GLOBAL_PARAMETERS_BINDING 15
+#endif // GLOBAL_PARAMETERS_BINDING
+layout(binding = GLOBAL_PARAMETERS_BINDING) uniform GlobalParameters_
+{
+    GlobalParameters globals;
+};
+
+
+#ifndef MAP_ATLAS_BINDING
+#define MAP_ATLAS_BINDING 16
+readonly layout(binding=MAP_ATLAS_BINDING, r32ui) uniform uimage2D mapAtlas;
+#endif // MAP_ATLAS_BINDING
+
+
+#ifndef LINE_BVH_V2_BINDING
+#define LINE_BVH_V2_BINDING 20
+#endif // LINE_BVH_V2_BINDING
+readonly  layout(std430, binding = LINE_BVH_V2_BINDING) buffer v2LinesBvh_ { vec4 v2LinesBvh[]; };
+
+#ifndef DF_TEXTURE_BINDING
+#define DF_TEXTURE_BINDING 21
+#endif // DF_TEXTURE_BINDING
+layout(binding=DF_TEXTURE_BINDING) uniform sampler2D distanceFieldTexture;
+
+
+#endif // BINDINGS_GLSLI

@@ -1,11 +1,16 @@
 #ifndef PATHFINDING_COMMON_GLSLI
 #define PATHFINDING_COMMON_GLSLI
 
-
 // Rather than using A* and friends, we store a series of directions,
 // 2 bits per room, (LEFT, UP, RIGHT, DOWN), so when it comes to updating
 // the AI, it's basically O(1).
 // The limitations of this are that we never really know the total distance
+
+#ifndef ROOM_DIRECTION_BINDING
+#define ROOM_DIRECTION_BINDING 20
+#endif // ROOM_DIRECTION_BINDING
+
+readonly layout(binding=2, rg32ui)   uniform uimage2D roomDirectionsImage;
 
 #define PATHFINDING_LEFT    0
 #define PATHFINDING_DOWN    1
@@ -30,16 +35,17 @@ ivec2 decodePathDirection(uint idx)
 }
 
 
-ivec2 calcDirectionCoordForRoom(ivec2 globalCoord,
+ivec2 calcDirectionCoordForRoom(ivec2 atlasCoord,
                                 uint roomId)
 {
-    globalCoord.x *= 2;
+    atlasCoord.x *= 2;
     if(roomId >= 33)
     {
-        globalCoord.x += 1;
+        atlasCoord.x += 1;
     }
-    return globalCoord;
+    return atlasCoord;
 }
+
 
 uint extractDirectionToRoom(uvec2 mask,
                             uint roomId)
@@ -55,14 +61,12 @@ uint extractDirectionToRoom(uvec2 mask,
 }
 
 
-// glslc complains about passing uimage2D as a parameter,
-// wanting it to be read only.
-#define getDirectionToRoom(/* uimage2D */ roomDirectionsImage,\
-                           /* ivec2 */ globalCoord,\
-                           /* uint */ roomId)\
-        extractDirectionToRoom(imageLoad(roomDirectionsImage,\
-                                         calcDirectionCoordForRoom((globalCoord), (roomId))).xy,\
-                               (roomId))
+uint getDirectionToRoom(ivec2 atlasCoord, uint roomId)
+{
 
+    ivec2 directionCoord = calcDirectionCoordForRoom(atlasCoord, roomId).xy;
+    uvec2 mask = imageLoad(roomDirectionsImage, directionCoord).xy;
+    return extractDirectionToRoom(mask, roomId);
+}
 
 #endif // PATHFINDING_COMMON_GLSLI

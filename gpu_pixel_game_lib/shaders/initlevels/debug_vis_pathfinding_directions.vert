@@ -3,13 +3,14 @@
 // dispatch GL_TRIANGLES, 128*128*6
 
 
+#define ROOM_DIRECTION_BINDING  2
+
 #include "../common.glsli"
 #include "../map_atlas_common.glsli"
 #include "../pathfinding_common.glsli"
 
 
 readonly layout(binding=1, r32ui)    uniform uimage2D mapAtlas;
-readonly layout(binding=2, rg32ui)   uniform uimage2D roomDirections;
 
 layout(location=0) uniform uvec2 targetLevelAndRoom;
 layout(location=0) out vec2 outShapeNdc;
@@ -35,7 +36,7 @@ void main()
         uint roomPixelMask = imageLoad(mapAtlas, coord).x;
         if(roomPixelMask != 0u)
         {
-            uint direction = getDirectionToRoom(roomDirections, coord, targetRoomId);
+            uint direction = getDirectionToRoom(coord, targetRoomId);
             int vertexId = triangleToQuadVertexIdZ(gl_VertexID % 6);
             vec2 X = decodePathDirection(direction);
             vec2 uv = vec2((vertexId & 1), (vertexId >> 1));
