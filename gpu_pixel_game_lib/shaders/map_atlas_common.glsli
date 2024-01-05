@@ -161,17 +161,21 @@ vec2 backgroundUVToAtlasUV(vec2 backgroundUV, MapAtlasLevelInfo atlasInfo)
 
 
 #define MAP_ATLAS_LEVEL_DATA_NUM_ROOMS_OFFSET   0
-#define MAP_ATLAS_LEVEL_DATA_START_ROOM_OFFSET  1
-#define MAP_ATLAS_LEVEL_DATA_END_ROOM_OFFSET    2
-#define MAP_ATLAS_LEVEL_DATA_ROOM_SPANS_OFFSET  3
-#define MAP_ATLAS_LEVEL_DATA_STRIDE             (MAX_ROOMS + 3)
+#define MAP_ATLAS_LEVEL_DATA_NUM_PATHS_OFFSET   1
+#define MAP_ATLAS_LEVEL_DATA_START_ROOM_OFFSET  2
+#define MAP_ATLAS_LEVEL_DATA_END_ROOM_OFFSET    3
+#define MAP_ATLAS_LEVEL_DATA_ROOM_SPANS_OFFSET  4
+#define MAP_ATLAS_LEVEL_DATA_PATH_SPANS_OFFSET  (MAP_ATLAS_LEVEL_DATA_ROOM_SPANS_OFFSET + MAX_ROOMS)
+#define MAP_ATLAS_LEVEL_DATA_STRIDE             (2 * MAX_ROOMS + 4)
 
 struct MapAtlasLevelData
 {
     uint    numRooms;
+    uint    numPaths;
     uint    startRoom;
     uint    endRoom;
     uint    packedRoomSpans[MAX_ROOMS];
+    uint    packedPathSpans[MAX_ROOMS];
 };
 
 

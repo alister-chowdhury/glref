@@ -2,6 +2,7 @@
 import os
 
 import numpy
+import time
 
 from OpenGL.GL import *
 from ctypes import c_void_p
@@ -200,6 +201,8 @@ class Renderer(object):
         self._debug_set_pos = 1
         self._mouse_uv = (0.5, 0.5)
 
+        self._time = time.time()
+
     def run(self):
         self.window.run()
 
@@ -289,7 +292,6 @@ class Renderer(object):
             ACTIVE_DF_SIZE,
             ACTIVE_DF_SIZE
         )
-
 
         self._direct_lighting_bg_map_v0 = viewport.FramebufferTarget(
             GL_R11F_G11F_B10F,
@@ -393,7 +395,7 @@ class Renderer(object):
         glNamedBufferStorage(self._global_parameters, len(global_parameters), global_parameters, 0)
         
         self._map_atlas_level_data = self._buffers_ptr[1]
-        glNamedBufferStorage(self._map_atlas_level_data, (4 * 8 * (32 + 3)), None, 0)
+        glNamedBufferStorage(self._map_atlas_level_data, (4 * 8 * (64 + 4)), None, 0)
 
         # gonna need to deal with this better
         indirection_table = numpy.array(
@@ -482,6 +484,9 @@ class Renderer(object):
 
     def _draw(self, wnd):
         glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT)
+        new_time = time.time()
+        dt = new_time - self._time
+        self._time = new_time
 
         if self._dirty_init_levels:
             self._dirty_init_levels = False
@@ -602,7 +607,7 @@ class Renderer(object):
             glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 4, self._player_pos)
             glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 5, self._player_dir)
             glUniform2f(0, self._mouse_uv[0], 1 - self._mouse_uv[1])
-            glUniform1f(1, 0.05/64)
+            glUniform1f(1, dt)
             glDispatchCompute(1, 1, 1)
             
 

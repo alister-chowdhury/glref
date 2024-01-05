@@ -11,43 +11,43 @@ struct DFTraceResult
     float   finalDist;
 };
 
-float df_sample(vec2 ro)
+float df_sample(sampler2D dftex, vec2 ro)
 {
-    return textureLod(distanceFieldTexture, ro, 0).x;
+    return textureLod(dftex, ro, 0).x;
 }
 
-vec2 df_gradient(vec2 ro)
+vec2 df_gradient(sampler2D dftex, vec2 ro)
 {
     float delta = 1.0 / ACTIVE_DF_SIZE;
-    float ref = df_sample(ro);
-    float dx = df_sample(ro + vec2(delta, 0)) - ref;
-    float dy = df_sample(ro + vec2(0, delta)) - ref;
+    float ref = df_sample(dftex, ro);
+    float dx = df_sample(dftex, ro + vec2(delta, 0)) - ref;
+    float dy = df_sample(dftex, ro + vec2(0, delta)) - ref;
     return vec2(dx, dy) / delta;
 }
 
-vec2 df_pushOutOfWallVec(vec2 ro)
+vec2 df_pushOutOfWallVec(sampler2D dftex, vec2 ro)
 {
     float delta = 1.0 / ACTIVE_DF_SIZE;
     float bias = 1.0 / ACTIVE_DF_SIZE;
-    float ref = df_sample(ro);
+    float ref = df_sample(dftex, ro);
     if(ref > bias)
     {
         return vec2(0);
     }
-    float dx = df_sample(ro + vec2(delta, 0)) - ref;
-    float dy = df_sample(ro + vec2(0, delta)) - ref;
+    float dx = df_sample(dftex, ro + vec2(delta, 0)) - ref;
+    float dy = df_sample(dftex, ro + vec2(0, delta)) - ref;
     vec2 gradient = vec2(dx, dy) / delta;
     return normalize(gradient) * saturate(bias - ref);
 }
 
 
-vec2 df_pushOutOfWall(vec2 ro)
+vec2 df_pushOutOfWall(sampler2D dftex, vec2 ro)
 {
-    return ro + df_pushOutOfWallVec(ro);
+    return ro + df_pushOutOfWallVec(dftex, ro);
 }
 
 
-DFTraceResult df_trace(vec2 ro, vec2 rd, float maxDist)
+DFTraceResult df_trace(sampler2D dftex, vec2 ro, vec2 rd, float maxDist)
 {
     const int maxSteps = 128;
     float bias = 0.5 / ACTIVE_DF_SIZE;
@@ -57,7 +57,7 @@ DFTraceResult df_trace(vec2 ro, vec2 rd, float maxDist)
     int i = 0;
     for(; i < maxSteps; ++i)
     {
-        float d = df_sample(ro) * 0.95;
+        float d = df_sample(dftex, ro) * 0.95;
         if(d < bias)
         {
             break;
@@ -76,6 +76,33 @@ DFTraceResult df_trace(vec2 ro, vec2 rd, float maxDist)
     result.numSamples = i;
     result.finalDist = maxDist - dist;
     return result;
+}
+
+float df_sample(vec2 ro)
+{
+    return df_sample(distanceFieldTexture, ro);
+}
+
+vec2 df_gradient(vec2 ro)
+{
+    return df_gradient(distanceFieldTexture, ro);
+}
+
+vec2 df_pushOutOfWallVec(vec2 ro)
+{
+    return df_pushOutOfWallVec(distanceFieldTexture, ro);
+}
+
+
+vec2 df_pushOutOfWall(vec2 ro)
+{
+    return df_pushOutOfWall(distanceFieldTexture, ro);
+}
+
+
+DFTraceResult df_trace(vec2 ro, vec2 rd, float maxDist)
+{
+    return df_trace(distanceFieldTexture, ro, rd, maxDist);
 }
 
 #endif // DF_COMMON_GLSLI

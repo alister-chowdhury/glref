@@ -268,11 +268,29 @@ void generateMapAtlasData(uint tid, uint levelId)
         ++numRooms;
     }
 
+    uint numPaths = 0;
+    uint evaluatePathId = 0xffffffffu;
+    uint pathPackedSpan = 0xffffffffu;
+
+    for(uint i=0; i<MAX_PATHS; ++i)
+    {
+        ivec4 nodeSpan = unpackSpan(pathQueue[i]);
+        if(nodeSpan.x == nodeSpan.z) { continue; }
+
+        if(i == tid)
+        {
+            evaluatePathId = numPaths;
+            pathPackedSpan = packSpan(nodeSpan);
+        }
+        ++numPaths;
+    }
+
     uint levelDataOffset = levelId * MAP_ATLAS_LEVEL_DATA_STRIDE;
 
     if(tid == 0u)
     {
         rwMapAtlasData[levelDataOffset + MAP_ATLAS_LEVEL_DATA_NUM_ROOMS_OFFSET] = numRooms;
+        rwMapAtlasData[levelDataOffset + MAP_ATLAS_LEVEL_DATA_NUM_PATHS_OFFSET] = numPaths;
         rwMapAtlasData[levelDataOffset + MAP_ATLAS_LEVEL_DATA_START_ROOM_OFFSET] = 0u;
         rwMapAtlasData[levelDataOffset + MAP_ATLAS_LEVEL_DATA_END_ROOM_OFFSET] = 0u;
     }
@@ -280,6 +298,10 @@ void generateMapAtlasData(uint tid, uint levelId)
     if(evaluateRoomId != 0xffffffffu)
     {
         rwMapAtlasData[levelDataOffset + MAP_ATLAS_LEVEL_DATA_ROOM_SPANS_OFFSET + evaluateRoomId] = roomPackedSpan;
+    }
+    if(evaluatePathId != 0xffffffffu)
+    {
+        rwMapAtlasData[levelDataOffset + MAP_ATLAS_LEVEL_DATA_PATH_SPANS_OFFSET + evaluatePathId] = pathPackedSpan;
     }
 }
 

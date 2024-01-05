@@ -28,6 +28,9 @@ void main()
     float levelToScreenScale = getLevelToBackgroundScale(atlasInfo);
     vec2 targetUV = screenUV * levelToScreenScale;
 
+    const float playerSpeed = 0.05;
+    float travelAmount = min(playerSpeed * deltaTime, PATHFINDING_MAX_DIST);
+
     vec2 playerPos = rwPlayerPos;
 
     if(length(playerPos - targetUV) > (0.5 / BACKGROUND_TILE_DIM))
@@ -39,7 +42,7 @@ void main()
         if(dot(playerDir, playerDir) > 0)
         {
             rwPlayerDir = playerDir;
-            playerPos = df_pushOutOfWall(playerPos + playerDir * deltaTime);
+            playerPos = df_pushOutOfWall(playerPos + playerDir * travelAmount);
             rwPlayerPos = playerPos;
         }
     }

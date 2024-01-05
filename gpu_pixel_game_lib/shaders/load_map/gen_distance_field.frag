@@ -9,5 +9,5 @@ layout(location=0) out float outDf;
 void main()
 {
     float df = findNearestDistanceBvhV2(uv, 3.0);
-    outDf = min(1.0, df);
+    outDf = df;
 }

@@ -49,5 +49,4 @@ layout(binding=DF_TEXTURE_BINDING) uniform sampler2D distanceFieldTexture;
 #endif // ASSET_ATLAS_BINDING
 readonly layout(binding=ASSET_ATLAS_BINDING) buffer assetAtlasBuffer_ { uvec4 assetAtlasBuffer[];};
 
-
 #endif // BINDINGS_GLSLI

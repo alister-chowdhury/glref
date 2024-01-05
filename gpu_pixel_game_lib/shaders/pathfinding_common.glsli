@@ -8,6 +8,9 @@
 #include "common.glsli"
 #include "bindings.glsli"
 #include "map_atlas_common.glsli"
+#include "df_tracing.glsli"
+
+#define PATHFINDING_MAX_DIST    (1.0 / BACKGROUND_TILE_DIM)
 
 #define PATHFINDING_LEFT    0
 #define PATHFINDING_DOWN    1
