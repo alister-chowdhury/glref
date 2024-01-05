@@ -71,13 +71,10 @@ uint getDirectionToRoom(ivec2 atlasCoord, uint roomId)
 vec2 calcPathfindingDirection(vec2 srcAtlasUV,
                               vec2 dstAtlasUV)
 {
-    bool smoothDirection = false;
-    vec2 delta = dstAtlasUV - srcAtlasUV;
-    float distSq = dot(delta, delta);
-    if(distSq < 1e-9)
-    {
-        return delta;
-    }
+    bool smoothDirection = false; // todo, they get trapped on walls
+                                  // need to do a df trace or something
+    vec2 delta = vec2(0);
+    float distSq = 0;
 
     ivec2 srcCoord = ivec2(srcAtlasUV * vec2(FINAL_ATLAS_WIDTH, FINAL_ATLAS_HEIGHT));
     ivec2 dstCoord = ivec2(dstAtlasUV * vec2(FINAL_ATLAS_WIDTH, FINAL_ATLAS_HEIGHT));
@@ -93,30 +90,91 @@ vec2 calcPathfindingDirection(vec2 srcAtlasUV,
     {
         uint roomId = unpackSectorIds(dstPacked).x;
         ivec2 direction = decodePathDirection(getDirectionToRoom(srcCoord, roomId));
-        if(smoothDirection)
-        {
-            srcCoord += direction;
-            srcPacked = imageLoad(mapAtlas, srcCoord).x;
-            if(hasAnySectors(srcPacked)
-                && !containsSharedSector(srcPacked, dstPacked))
-            {
-                ivec2 newDirecton = direction
-                                  + decodePathDirection(getDirectionToRoom(srcCoord, roomId));
-
-                if(newDirecton.x != 0 && newDirecton.y != 0)
-                {
-                    direction = newDirecton;
-                }
-            }
-        }
-
         delta = vec2(direction);
         distSq = dot(delta, delta);
     }
-
-    delta *= inversesqrt(distSq);
+    else
+    {
+        delta = dstAtlasUV - srcAtlasUV;
+        distSq = dot(delta, delta);
+    }
+    if(distSq > 0)
+    {
+        delta *= inversesqrt(distSq);
+    }
     return delta;
 }
 
+
+vec2 calcPathfindingDirectionSmooth(vec2 srcAtlasUV,
+                                    vec2 dstAtlasUV)
+{
+    srcAtlasUV *= vec2(FINAL_ATLAS_WIDTH, FINAL_ATLAS_HEIGHT);
+    dstAtlasUV *= vec2(FINAL_ATLAS_WIDTH, FINAL_ATLAS_HEIGHT);
+
+    // Prevent attempting to walk through walls at a grazing angle.
+    // Bit of a hack, but what in life isn't?
+    srcAtlasUV -= vec2(0, 0.25);
+    dstAtlasUV -= vec2(0, 0.25);
+
+    packed_sector_ids_t dstPacked = imageLoad(mapAtlas, ivec2(dstAtlasUV)).x;
+
+    if(!hasAnySectors(dstPacked))
+    {
+        return vec2(0);
+    }
+
+    uint roomId = unpackSectorIds(dstPacked).x;
+
+    vec2 delta = dstAtlasUV - srcAtlasUV;
+    float deltaDistSq = dot(delta, delta);
+    if(deltaDistSq > 1)
+    {
+        delta *= inversesqrt(deltaDistSq);
+    }
+
+    vec4 interp = vec4(0, 0, fract(srcAtlasUV));
+    interp.xy = vec2(1) - interp.zw;
+
+    ivec2 srcCoordBase = ivec2(srcAtlasUV);
+
+    vec2 direction = vec2(0);
+
+    for(int dXY = 0; dXY < 4; ++dXY)
+    {
+        int dX = dXY & 1;
+        int dY = dXY >> 1;
+        ivec2 srcCoord = srcCoordBase + ivec2(dX, dY);
+        packed_sector_ids_t srcPacked = imageLoad(mapAtlas, srcCoord).x;
+        if(hasAnySectors(srcPacked))
+        {
+            float weight = ((dX == 0) ? interp.x : interp.z)
+                         * ((dY == 0) ? interp.y : interp.w);
+            if(containsSharedSector(srcPacked, dstPacked))
+            {
+                direction += delta * weight;
+            }
+            else
+            {
+
+                uint directionType = getDirectionToRoom(srcCoord, roomId);
+                direction += vec2(decodePathDirection(directionType)) * weight;
+            }
+        }
+    }
+
+    float distSq = dot(direction, direction);
+    if(distSq == 0)
+    {
+        direction = delta; // get out of walls!
+        distSq = dot(direction, direction);
+    }
+
+    if(distSq > 0)
+    {
+        direction *= inversesqrt(distSq);
+    }
+    return direction;
+}
 
 #endif // PATHFINDING_COMMON_GLSLI

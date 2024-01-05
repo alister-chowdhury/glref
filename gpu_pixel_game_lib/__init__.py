@@ -48,6 +48,8 @@ DEBUG_DRAW_LINES_FRAG = os.path.join(_SHADER_DIR, "load_map", "debug_draw_lines.
 
 DEBUG_SET_PLAYER_POS_COMP = os.path.join(_SHADER_DIR, "playing", "debug_set_player_pos.comp")
 DEBUG_PLAYER_POS_MOVE_TO_COMP = os.path.join(_SHADER_DIR, "playing", "debug_player_pos_move_to.comp")
+DEBUG_PLAYER_POS_MOVE_TO_DIR_VERT = os.path.join(_SHADER_DIR, "playing", "debug_player_pos_move_to_dir.vert")
+DEBUG_PLAYER_POS_MOVE_TO_DIR_FRAG = os.path.join(_SHADER_DIR, "playing", "debug_player_pos_move_to_dir.frag")
 VIS_GENERATE_VERT = os.path.join(_SHADER_DIR, "playing", "vis_generate.vert")
 VIS_GENERATE_FRAG = os.path.join(_SHADER_DIR, "playing", "vis_generate.frag")
 VIS_GENERATE_CLEAR_FRAG = os.path.join(_SHADER_DIR, "playing", "vis_generate_clear.frag")

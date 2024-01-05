@@ -105,6 +105,12 @@ _DEBUG_PLAYER_POS_MOVE_TO_PROGRAM = viewport.make_permutation_program(
     GL_COMPUTE_SHADER = gpu_pixel_game_lib.DEBUG_PLAYER_POS_MOVE_TO_COMP
 )
 
+_DEBUG_PLAYER_POS_MOVE_TO_DIR_PROGRAM = viewport.make_permutation_program(
+    _DEBUGGING,
+    GL_VERTEX_SHADER = gpu_pixel_game_lib.DEBUG_PLAYER_POS_MOVE_TO_DIR_VERT,
+    GL_FRAGMENT_SHADER = gpu_pixel_game_lib.DEBUG_PLAYER_POS_MOVE_TO_DIR_FRAG
+)
+
 _VIS_GENERATE_PROGRAM = viewport.make_permutation_program(
     _DEBUGGING,
     GL_VERTEX_SHADER = gpu_pixel_game_lib.VIS_GENERATE_VERT,
@@ -404,6 +410,9 @@ class Renderer(object):
         self._player_pos = self._buffers_ptr[3]
         glNamedBufferStorage(self._player_pos, ubo_align_size(4*2), None, 0)
 
+        self._player_dir = self._buffers_ptr[4]
+        glNamedBufferStorage(self._player_dir, ubo_align_size(4*2), None, 0)
+
         self._map_atlas_ptr = ctypes.c_int()
         glCreateTextures(GL_TEXTURE_2D, 1, self._map_atlas_ptr)
         self._map_atlas = self._map_atlas_ptr.value
@@ -589,9 +598,11 @@ class Renderer(object):
             glBindBufferBase(GL_UNIFORM_BUFFER, 0, self._global_parameters)
             glBindImageTexture(1, self._map_atlas, 0, False, 0, GL_READ_ONLY, GL_R32UI)
             glBindImageTexture(2, self._pathfinding_directions, 0, False, 0, GL_READ_ONLY, GL_RG32UI)
-            glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 3, self._player_pos)
+            glBindTextureUnit(3, self._df_bg_map.texture)
+            glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 4, self._player_pos)
+            glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 5, self._player_dir)
             glUniform2f(0, self._mouse_uv[0], 1 - self._mouse_uv[1])
-            glUniform1f(1, 0.1/64)
+            glUniform1f(1, 0.05/64)
             glDispatchCompute(1, 1, 1)
             
 
@@ -661,6 +672,17 @@ class Renderer(object):
             glBindBufferBase(GL_UNIFORM_BUFFER, 1, self._player_pos)
             glBindTextureUnit(2, self._df_bg_map.texture)
             glDrawArrays(GL_TRIANGLES, 0, 3)
+            glDisable(GL_BLEND)
+
+        if True and not self._debug_set_pos:
+            glEnable(GL_BLEND)
+            glBlendFunc(GL_ONE, GL_ONE_MINUS_SRC_ALPHA)
+            glBlendEquation(GL_FUNC_ADD)
+            glUseProgram(_DEBUG_PLAYER_POS_MOVE_TO_DIR_PROGRAM.one())
+            glBindBufferBase(GL_UNIFORM_BUFFER, 0, self._global_parameters)
+            glBindBufferBase(GL_UNIFORM_BUFFER, 1, self._player_pos)
+            glBindBufferBase(GL_UNIFORM_BUFFER, 2, self._player_dir)
+            glDrawArrays(GL_TRIANGLES, 0, 6)
             glDisable(GL_BLEND)
 
         # Debug draw lines

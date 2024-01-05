@@ -3,15 +3,19 @@
 #define GLOBAL_PARAMETERS_BINDING       0
 #define MAP_ATLAS_BINDING               1
 #define ROOM_DIRECTION_BINDING          2
+#define DF_TEXTURE_BINDING              3
+
 
 #include "../common.glsli"
 #include "../bindings.glsli"
 #include "../map_atlas_common.glsli"
 #include "../pathfinding_common.glsli"
+#include "../df_tracing.glsli"
 
 layout(local_size_x=1) in;
 
-layout(std430, binding = 3) buffer rwPlayerPos_ { vec2 rwPlayerPos; };
+layout(std430, binding = 4) buffer rwPlayerPos_ { vec2 rwPlayerPos; };
+layout(std430, binding = 5) buffer rwPlayerDir_ { vec2 rwPlayerDir; };
 
 layout(location=0) uniform vec2  screenUV;
 layout(location=1) uniform float deltaTime;
@@ -25,9 +29,18 @@ void main()
     vec2 targetUV = screenUV * levelToScreenScale;
 
     vec2 playerPos = rwPlayerPos;
-    playerPos += calcPathfindingDirection(
-        backgroundUVToAtlasUV(playerPos, atlasInfo),
-        backgroundUVToAtlasUV(targetUV, atlasInfo)
-    ) * deltaTime;
-    rwPlayerPos = playerPos;
+
+    if(length(playerPos - targetUV) > (0.5 / BACKGROUND_TILE_DIM))
+    {    
+        vec2 playerDir =  calcPathfindingDirectionSmooth(
+            backgroundUVToAtlasUV(playerPos, atlasInfo),
+            backgroundUVToAtlasUV(targetUV, atlasInfo)
+        );
+        if(dot(playerDir, playerDir) > 0)
+        {
+            rwPlayerDir = playerDir;
+            playerPos = df_pushOutOfWall(playerPos + playerDir * deltaTime);
+            rwPlayerPos = playerPos;
+        }
+    }
 }

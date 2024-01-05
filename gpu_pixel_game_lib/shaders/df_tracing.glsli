@@ -16,6 +16,37 @@ float df_sample(vec2 ro)
     return textureLod(distanceFieldTexture, ro, 0).x;
 }
 
+vec2 df_gradient(vec2 ro)
+{
+    float delta = 1.0 / ACTIVE_DF_SIZE;
+    float ref = df_sample(ro);
+    float dx = df_sample(ro + vec2(delta, 0)) - ref;
+    float dy = df_sample(ro + vec2(0, delta)) - ref;
+    return vec2(dx, dy) / delta;
+}
+
+vec2 df_pushOutOfWallVec(vec2 ro)
+{
+    float delta = 1.0 / ACTIVE_DF_SIZE;
+    float bias = 1.0 / ACTIVE_DF_SIZE;
+    float ref = df_sample(ro);
+    if(ref > bias)
+    {
+        return vec2(0);
+    }
+    float dx = df_sample(ro + vec2(delta, 0)) - ref;
+    float dy = df_sample(ro + vec2(0, delta)) - ref;
+    vec2 gradient = vec2(dx, dy) / delta;
+    return normalize(gradient) * saturate(bias - ref);
+}
+
+
+vec2 df_pushOutOfWall(vec2 ro)
+{
+    return ro + df_pushOutOfWallVec(ro);
+}
+
+
 DFTraceResult df_trace(vec2 ro, vec2 rd, float maxDist)
 {
     const int maxSteps = 128;
