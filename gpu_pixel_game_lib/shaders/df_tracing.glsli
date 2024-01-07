@@ -37,7 +37,7 @@ vec2 df_pushOutOfWallVec(sampler2D dftex, vec2 ro)
     float dx = df_sample(dftex, ro + vec2(delta, 0)) - ref;
     float dy = df_sample(dftex, ro + vec2(0, delta)) - ref;
     vec2 gradient = vec2(dx, dy) / delta;
-    return normalize(gradient) * saturate(bias - ref);
+    return normalize(gradient) * saturate(bias - ref) * 1.05;
 }
 
 
@@ -90,13 +90,13 @@ vec2 df_gradient(vec2 ro)
 
 vec2 df_pushOutOfWallVec(vec2 ro)
 {
-    return df_pushOutOfWallVec(distanceFieldTexture, ro);
+    return df_pushOutOfWallVec(pathFindingDistanceFieldTexture, ro);
 }
 
 
 vec2 df_pushOutOfWall(vec2 ro)
 {
-    return df_pushOutOfWall(distanceFieldTexture, ro);
+    return df_pushOutOfWall(pathFindingDistanceFieldTexture, ro);
 }
 
 

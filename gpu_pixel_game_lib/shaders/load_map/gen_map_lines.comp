@@ -7,12 +7,31 @@
 #include "../map_atlas_common.glsli"
 
 
+#define GENERATION_MODE_PATHFINDING 0
+#define GENERATION_MODE_LIGHTING    1
+
+#ifndef GENERATION_MODE
+#define GENERATION_MODE GENERATION_MODE_LIGHTING
+#endif // GENERATION_MODE
+
 #define THREAD_SIZE         MAX_LEVEL_DIM
 #define INVALID_OFFSET      -0x7ffffff
+
+#if GENERATION_MODE == GENERATION_MODE_PATHFINDING
+
+#define UV_OFFSET_BASE      0
+#define UV_OFFSET_INVBASE   0
+#define UV_OFFSET_AMOUNT    0
+#define UV_Y_OFFSET         0
+
+#else // GENERATION_MODE == GENERATION_MODE_LIGHTING
+
 #define UV_OFFSET_BASE      (0.125)
 #define UV_OFFSET_INVBASE   (1.-0.125)
 #define UV_OFFSET_AMOUNT    (0.25 * 1.5)
 #define UV_Y_OFFSET         (0.25 * 1.5)
+
+#endif // GENERATION_MODE
 
 
 layout(local_size_x=THREAD_SIZE) in;
@@ -249,7 +268,9 @@ void main()
 
     lineAllocator[tid] = evaluateHorizontal(tid, 0, atlasInfo, true)
                        + evaluateVertical(tid, 0, atlasInfo, true)
+#if GENERATION_MODE == GENERATION_MODE_LIGHTING
                        + evaluateCorners(tid, 0, atlasInfo, true)
+#endif // GENERATION_MODE == GENERATION_MODE_LIGHTING
                         ;
     barrier();
 
@@ -261,13 +282,18 @@ void main()
 
     offset = evaluateHorizontal(tid, offset, atlasInfo, false);
     offset = evaluateVertical(tid, offset, atlasInfo, false);
-    offset = evaluateCorners(tid, offset, atlasInfo, false);
 
+#if GENERATION_MODE == GENERATION_MODE_LIGHTING
+    offset = evaluateCorners(tid, offset, atlasInfo, false);
+#endif // GENERATION_MODE == GENERATION_MODE_LIGHTING
 
     if(tid == (THREAD_SIZE-1))
     {
         outNumLines = offset;
+
+#if GENERATION_MODE == GENERATION_MODE_LIGHTING
         outVisDispatch[OUT_VIS_DISPATCH_ADDR] = 9 * offset;
+#endif // GENERATION_MODE == GENERATION_MODE_LIGHTING
     }
 }
 

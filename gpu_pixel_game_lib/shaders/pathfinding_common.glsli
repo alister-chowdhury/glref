@@ -117,8 +117,8 @@ vec2 calcPathfindingDirectionSmooth(vec2 srcAtlasUV,
 
     // Prevent attempting to walk through walls at a grazing angle.
     // Bit of a hack, but what in life isn't?
-    srcAtlasUV -= vec2(0, 0.25);
-    dstAtlasUV -= vec2(0, 0.25);
+    // srcAtlasUV -= vec2(0, 0.25);
+    // dstAtlasUV -= vec2(0, 0.25);
 
     packed_sector_ids_t dstPacked = imageLoad(mapAtlas, ivec2(dstAtlasUV)).x;
 
@@ -149,10 +149,10 @@ vec2 calcPathfindingDirectionSmooth(vec2 srcAtlasUV,
         int dY = dXY >> 1;
         ivec2 srcCoord = srcCoordBase + ivec2(dX, dY);
         packed_sector_ids_t srcPacked = imageLoad(mapAtlas, srcCoord).x;
+        float weight = ((dX == 0) ? interp.x : interp.z)
+                     * ((dY == 0) ? interp.y : interp.w);
         if(hasAnySectors(srcPacked))
         {
-            float weight = ((dX == 0) ? interp.x : interp.z)
-                         * ((dY == 0) ? interp.y : interp.w);
             if(containsSharedSector(srcPacked, dstPacked))
             {
                 direction += delta * weight;
@@ -163,6 +163,12 @@ vec2 calcPathfindingDirectionSmooth(vec2 srcAtlasUV,
                 uint directionType = getDirectionToRoom(srcCoord, roomId);
                 direction += vec2(decodePathDirection(directionType)) * weight;
             }
+        }
+        else
+        {
+            // Push back against walls
+            // direction += vec2((dX == 0) ? 1 : -1,
+            //                   (dY == 0) ? 1 : -1) * weight;
         }
     }
 
@@ -178,6 +184,14 @@ vec2 calcPathfindingDirectionSmooth(vec2 srcAtlasUV,
         direction *= inversesqrt(distSq);
     }
     return direction;
+}
+
+
+bool pf_inWall(vec2 srcAtlasUV)
+{
+    ivec2 srcCoord = ivec2(srcAtlasUV * vec2(FINAL_ATLAS_WIDTH, FINAL_ATLAS_HEIGHT));
+    packed_sector_ids_t srcPacked = imageLoad(mapAtlas, srcCoord).x;
+    return !hasAnySectors(srcPacked);
 }
 
 #endif // PATHFINDING_COMMON_GLSLI

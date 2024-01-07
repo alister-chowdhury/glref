@@ -45,7 +45,8 @@
 
 #define packed_span_t   uint
 
-#define packed_sector_ids_t  uint
+#define packed_sector_ids_t   uint
+#define packed_sector_ids_t4  uvec4
 
 #define sector_id_t     uint
 #define sector_id_t2    uvec2

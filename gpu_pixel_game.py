@@ -279,6 +279,19 @@ class Renderer(object):
             ACTIVE_BACKGROUND_SIZE
         )
 
+        self._pathfinding_df_bg_map = viewport.FramebufferTarget(
+            GL_R16F,
+            True,
+            custom_texture_settings=lininterp_texture_settings
+        )
+        self._pathfinding_df_bg_map_fb = viewport.Framebuffer(
+            (
+                self._pathfinding_df_bg_map,
+            ),
+            ACTIVE_DF_SIZE,
+            ACTIVE_DF_SIZE
+        )
+
 
         self._df_bg_map = viewport.FramebufferTarget(
             GL_R16F,
@@ -535,8 +548,36 @@ class Renderer(object):
 
         if self._dirty_load_level:
             self._dirty_load_level = False
+
+            # Path finding distance field
             # Generate visibility lines
-            glUseProgram(_GEN_MAP_LINES_COMP_PROGRAM.get(OUT_VIS_DISPATCH_ADDR=VIS_DISPATCH_OFFSET))
+            glUseProgram(_GEN_MAP_LINES_COMP_PROGRAM.get(GENERATION_MODE="GENERATION_MODE_PATHFINDING"))
+            glBindBufferBase(GL_UNIFORM_BUFFER, 0, self._global_parameters)
+            glBindImageTexture(1, self._map_atlas, 0, False, 0, GL_READ_ONLY, GL_R32UI)
+            glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 2, self._num_lines_buffer)
+            glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 3, self._lines_buffer)
+            glDispatchCompute(1, 1, 1)
+            glMemoryBarrier(GL_UNIFORM_BARRIER_BIT | GL_SHADER_STORAGE_BARRIER_BIT)
+     
+            # Generate BVH
+            glUseProgram(_GENERATE_BVH_PROGRAM.get(NUM_LINES_USE_UBO=1, NUM_LEVELS=BVH_NUM_LEVELS))
+            glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 0, self._lines_buffer)
+            glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 1, self._bvh_buffer)
+            glBindBufferBase(GL_UNIFORM_BUFFER, 2, self._num_lines_buffer)
+            glDispatchCompute(1, 1, 1)
+            glMemoryBarrier(GL_SHADER_STORAGE_BARRIER_BIT)
+
+            with self._pathfinding_df_bg_map_fb.bind():
+                glViewport(0, 0, ACTIVE_DF_SIZE, ACTIVE_DF_SIZE)
+                glUseProgram(_GEN_DISTANCE_FIELD_PROGRAM.get(VS_OUTPUT_UV=0))
+                glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 0, self._bvh_buffer)
+                glBindVertexArray(viewport.get_dummy_vao())
+                glDrawArrays(GL_TRIANGLES, 0, 3)
+
+
+            # Generate visibility lines
+            glUseProgram(_GEN_MAP_LINES_COMP_PROGRAM.get(OUT_VIS_DISPATCH_ADDR=VIS_DISPATCH_OFFSET,
+                                                         GENERATION_MODE="GENERATION_MODE_LIGHTING"))
             glBindBufferBase(GL_UNIFORM_BUFFER, 0, self._global_parameters)
             glBindImageTexture(1, self._map_atlas, 0, False, 0, GL_READ_ONLY, GL_R32UI)
             glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 2, self._num_lines_buffer)
@@ -603,7 +644,7 @@ class Renderer(object):
             glBindBufferBase(GL_UNIFORM_BUFFER, 0, self._global_parameters)
             glBindImageTexture(1, self._map_atlas, 0, False, 0, GL_READ_ONLY, GL_R32UI)
             glBindImageTexture(2, self._pathfinding_directions, 0, False, 0, GL_READ_ONLY, GL_RG32UI)
-            glBindTextureUnit(3, self._df_bg_map.texture)
+            glBindTextureUnit(3, self._pathfinding_df_bg_map.texture)
             glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 4, self._player_pos)
             glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 5, self._player_dir)
             glUniform2f(0, self._mouse_uv[0], 1 - self._mouse_uv[1])
