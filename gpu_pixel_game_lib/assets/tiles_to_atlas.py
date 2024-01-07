@@ -289,10 +289,10 @@ def pack_asset_entry(entry):
     roi = entry["roi"]
     roi_packed = numpy.array(
         [
-            roi[0],
             roi[1],
+            roi[0],
+            size[1] - roi[3],
             size[0] - roi[2],
-            size[1] - roi[3]
         ],
         dtype=numpy.uint8
     ).view(numpy.uint16)
@@ -397,3 +397,6 @@ if __name__ == "__main__":
     with open(_ATLAS_DATA, "wb") as out_fp:
         for ordered_id in ordered_ids:
             out_fp.write(pack_asset_entry(mapping[ordered_id]))
+
+    from pprint import pprint
+    pprint(mapping)

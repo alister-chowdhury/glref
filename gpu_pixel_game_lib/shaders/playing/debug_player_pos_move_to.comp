@@ -29,7 +29,7 @@ void main()
     vec2 targetUV = screenUV * levelToScreenScale;
 
     const float playerSpeed = 0.04;
-    // const float playerSpeed = 0.5;
+    // const float playerSpeed = 0.2;
     // const float playerSpeed = 10.0;
     float travelAmount = min(playerSpeed * deltaTime, PATHFINDING_MAX_DIST);
 

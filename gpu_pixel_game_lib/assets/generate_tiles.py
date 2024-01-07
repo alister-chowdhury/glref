@@ -168,13 +168,14 @@ def _dispatch_procedural(args):
 
 if __name__ == "__main__":
 
-    for filename in os.listdir(_STATIC_DIR):
-        if filename.endswith(".png"):
-            shutil.copyfile(
-                os.path.join(_STATIC_DIR, filename),
-                os.path.join(_TILES_DIR, filename)
-            )
-            print("Copying: {0}".format(filename))
+    for root, _, filenames in os.walk(_STATIC_DIR):
+        for filename in filenames:
+            if filename.endswith(".png"):
+                shutil.copyfile(
+                    os.path.join(root, filename),
+                    os.path.join(_TILES_DIR, filename)
+                )
+                print("Copying: {0}".format(filename))
 
     procedral_generators = (
         _generate_brick_commands,

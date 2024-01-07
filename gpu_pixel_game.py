@@ -112,6 +112,12 @@ _DEBUG_PLAYER_POS_MOVE_TO_DIR_PROGRAM = viewport.make_permutation_program(
     GL_FRAGMENT_SHADER = gpu_pixel_game_lib.DEBUG_PLAYER_POS_MOVE_TO_DIR_FRAG
 )
 
+_DEBUG_CHAR0_MOVING_PROGRAM = viewport.make_permutation_program(
+    _DEBUGGING,
+    GL_VERTEX_SHADER = gpu_pixel_game_lib.DEBUG_CHAR0_MOVING_VERT,
+    GL_FRAGMENT_SHADER = gpu_pixel_game_lib.DEBUG_CHAR0_MOVING_FRAG
+)
+
 _VIS_GENERATE_PROGRAM = viewport.make_permutation_program(
     _DEBUGGING,
     GL_VERTEX_SHADER = gpu_pixel_game_lib.VIS_GENERATE_VERT,
@@ -202,6 +208,7 @@ class Renderer(object):
         self._mouse_uv = (0.5, 0.5)
 
         self._time = time.time()
+        self._start_time = time.time()
 
     def run(self):
         self.window.run()
@@ -724,10 +731,20 @@ class Renderer(object):
             glEnable(GL_BLEND)
             glBlendFunc(GL_ONE, GL_ONE_MINUS_SRC_ALPHA)
             glBlendEquation(GL_FUNC_ADD)
-            glUseProgram(_DEBUG_PLAYER_POS_MOVE_TO_DIR_PROGRAM.one())
-            glBindBufferBase(GL_UNIFORM_BUFFER, 0, self._global_parameters)
-            glBindBufferBase(GL_UNIFORM_BUFFER, 1, self._player_pos)
-            glBindBufferBase(GL_UNIFORM_BUFFER, 2, self._player_dir)
+            # Draw char0 sprite vs arrow
+            if True:
+                glUseProgram(_DEBUG_CHAR0_MOVING_PROGRAM.one())
+                glBindBufferBase(GL_UNIFORM_BUFFER, 0, self._global_parameters)
+                glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 1, self._asset_atlas_data)
+                glBindBufferBase(GL_UNIFORM_BUFFER, 2, self._player_pos)
+                glBindBufferBase(GL_UNIFORM_BUFFER, 3, self._player_dir)
+                glBindTextureUnit(4, self._asset_atlas_base)
+                glUniform1f(0, (self._time - self._start_time)*12.0)
+            else:
+                glUseProgram(_DEBUG_PLAYER_POS_MOVE_TO_DIR_PROGRAM.one())
+                glBindBufferBase(GL_UNIFORM_BUFFER, 0, self._global_parameters)
+                glBindBufferBase(GL_UNIFORM_BUFFER, 1, self._player_pos)
+                glBindBufferBase(GL_UNIFORM_BUFFER, 2, self._player_dir)
             glDrawArrays(GL_TRIANGLES, 0, 6)
             glDisable(GL_BLEND)
 
