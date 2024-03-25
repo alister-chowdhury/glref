@@ -1,0 +1,224 @@
+#version 460 core
+
+// THIS IS A SKELETON TO ACT AS A REFERENCE
+// AND NOT EXPECTED TO ACTUALLY WORK!
+
+#define TILESIZE 16
+
+// "Main" passes in order
+#define PASS_MODE_ID_SQ_00      0
+#define PASS_MODE_ID_SQ_11      1
+#define PASS_MODE_ID_SQ_10      2
+#define PASS_MODE_ID_SQ_01      3
+
+// "Side" passes, for when we have an
+// odd number of tiles
+#define PASS_MODE_ID_SIDE0      4
+#define PASS_MODE_ID_SIDE1      5
+
+// "Corner" pass, for if both the width and height
+// are an odd number.
+#define PASS_MODE_ID_CORNER     6
+
+layout(local_size_x=TILESIZE, local_size_y=TILESIZE) in;
+
+
+layout(binding=0, r8) uniform image2D blueNoiseBuffer;
+layout(binding=1) uniform Settings_
+{
+    uvec4 passParams;   // .x  = pass mode
+                        // .yz = size (tiles)
+                        // .w  = asfloat(expMultiplier)
+};
+
+
+uvec2 getTileId()
+{
+    uint passMode = passParams.x;
+
+    // "Main" passes
+    if(passMode >= PASS_MODE_ID_SQ_00 && passMode <= PASS_MODE_ID_SQ_01)
+    {
+        uvec2 offset = gl_WorkGroupID.xy * 2u;
+        if((passMode == PASS_MODE_ID_SQ_11) || (passMode == PASS_MODE_ID_SQ_10))
+        {
+            offset.x += 1u;
+        }
+        if((passMode == PASS_MODE_ID_SQ_11) || (passMode == PASS_MODE_ID_SQ_01))
+        {
+            offset.y += 1u;
+        }
+        return offset;
+    }
+    
+    // "Side" passes
+    uvec2 numTiles = passParams.yz;
+
+    if((passMode == PASS_MODE_ID_SIDE0) || (passMode == PASS_MODE_ID_SIDE1))
+    {
+        uint linearId = gl_WorkGroupID.x;
+        uint numX = numTiles.x / 2u;
+        uint numY = numTiles.y / 2u;
+        uint localOffset = (passMode == PASS_MODE_ID_SIDE0) ? 0u : 1u;
+
+        if((numTiles.x & 1u) == 1u)
+        {
+            if(linearId > numY)
+            {
+                linearId -= numY;
+            }
+            else
+            {
+                return uvec2(numTiles.x - 1u, linearId * 2u + localOffset);
+            }
+        }
+
+        // if((numTiles.y & 1u) == 1u) // implicitly taken
+        {
+            return uvec2(linearId * 2u + localOffset, numTiles.y - 1u);
+        }
+    }
+
+    // "Corner" pass
+    // passMode == PASS_MODE_ID_CORNER
+    return numTiles - uvec2(1u);
+}
+
+// LDS with two uses:
+//  1. Scratch space for neighbouring tile pixels, to accelerate
+//     initial background energy computation.
+//  2. Storage for the current background energy state of the tile.
+shared float tileBufferLDS[TILESIZE * TILESIZE];
+
+#define LDS_OFFSET(v) ((v).y * TILESIZE + (v).x)
+
+
+void loadNeighbouringTile(ivec2 tileId)
+{
+    ivec2 numTiles = ivec2(passParams.yz);
+
+    // Wrap around to the next tile over.
+    if(tileId.x < 0)                { tileId.x += numTiles.x; }
+    else if(tileId.x >= numTiles.x) { tileId.x -= numTiles.x; }
+    if(tileId.y < 0)                { tileId.y += numTiles.y; }
+    else if(tileId.y >= numTiles.y) { tileId.y -= numTiles.y; }
+
+    tileBufferLDS[LDS_OFFSET(gl_LocalInvocationID.xy)] = imageLoad(blueNoiseBuffer,
+                                                                   tileId * TILESIZE + ivec2(gl_LocalInvocationID.xy)).x;
+
+    barrier();
+}
+
+
+float getEnergyFromNeighbour(ivec2 tileId, ivec2 direction)
+{
+    loadNeighbouringTile(tileId + direction);
+    ivec2 offset = direction * TILESIZE - ivec2(gl_LocalInvocationID.xy);
+    float expMultiplier = passParams.w;
+    float totalEnergy = 0.0;
+    for(int y=0; y<TILESIZE; ++y)
+    for(int x=0; x<TILESIZE; ++x)
+    {
+        vec2 delta = vec2(offset + ivec2(x, y));
+        totalEnergy += exp2(-dot(delta, delta) * expMultiplier) * tileBufferLDS[LDS_OFFSET(ivec2(x, y))];
+    }
+    barrier();
+    return totalEnergy;
+}
+
+
+float getInitialEnergyState(ivec2 tileId)
+{
+    float energy = 0.0;
+    // energy += getBackgroundEnergy(tileId, etc, etc);
+
+    // TODO: Use permutations:
+    //      first pass doesn't need to check the existing state
+    //      second pass only needs to look at diagonals
+    //      side0 pass only needs to look left and right OR up and down
+    energy += getEnergyFromNeighbour(tileId, ivec2(-1, -1));
+    energy += getEnergyFromNeighbour(tileId, ivec2( 0, -1));
+    energy += getEnergyFromNeighbour(tileId, ivec2(-1, -1));
+    energy += getEnergyFromNeighbour(tileId, ivec2(-1,  0));
+    energy += getEnergyFromNeighbour(tileId, ivec2( 1,  0));
+    energy += getEnergyFromNeighbour(tileId, ivec2(-1,  1));
+    energy += getEnergyFromNeighbour(tileId, ivec2( 0,  1));
+    energy += getEnergyFromNeighbour(tileId, ivec2(-1,  1));
+    return energy;
+}
+
+
+// Pass in `uintBitsToFloat(0x7f7fffffu)` if already solved
+ivec2 findNextVoid(float energy)
+{
+    tileBufferLDS[LDS_OFFSET(gl_LocalInvocationID.xy)] = energy;
+    barrier();
+
+    // Reduce vertically, attempting to avoid a bank conflict
+    if(gl_LocalInvocationID.x < TILESIZE)
+    {
+        int x = int(gl_LocalInvocationID.x);
+        int voidY = 0;
+        float voidValue = tileBufferLDS[LDS_OFFSET(ivec2(x, 0))];
+        for(int y = 1; y < TILESIZE; ++y)
+        {
+            float currentVoid = tileBufferLDS[LDS_OFFSET(ivec2(x, y))];   
+            if(currentVoid < voidValue)
+            {
+                voidValue = currentVoid;
+                voidY = y;
+            }
+        }
+
+        // Write back into memory only accessed by this thread
+        tileBufferLDS[LDS_OFFSET(ivec2(x, 0))] = voidValue;
+        tileBufferLDS[LDS_OFFSET(ivec2(x, 1))] = intBitsToFloat(voidY);
+    }
+    barrier();
+
+
+    // Reduce horizonatally 
+    {
+        float voidValue = tileBufferLDS[LDS_OFFSET(ivec2(0, 0))];
+        ivec2 voidCoord = ivec2(0, floatBitsToInt(tileBufferLDS[LDS_OFFSET(ivec2(0, 1))]));
+        for(int x=1; x<TILESIZE; ++x)
+        {
+            float currentVoidValue = tileBufferLDS[LDS_OFFSET(ivec2(x, 0))];
+            if(currentVoidValue < voidValue)
+            {
+                voidValue = currentVoidValue;
+                voidCoord = ivec2(x, floatBitsToInt(tileBufferLDS[LDS_OFFSET(ivec2(x, 1))]));
+            }
+        }
+
+        barrier();
+        return voidCoord;
+    }
+}
+
+
+void main()
+{
+    float value = 0.0;
+    ivec2 tileId = ivec2(getTileId());
+    float energy = getInitialEnergyState(tileId);
+    ivec2 coord = ivec2(gl_LocalInvocationID.xy);
+    float expMultiplier = passParams.w;
+
+    for(int i=0; i<255; ++i)
+    {
+        ivec2 nextCoord = findNextVoid(value == 0.0 ? energy : uintBitsToFloat(0x7f7fffffu));
+        float iterationValue = float(255 - i) / 255.0f;
+        if(nextCoord.x == coord.x && nextCoord.y == coord.y)
+        {
+            value = iterationValue;
+        }
+        else
+        {
+            vec2 delta = vec2(nextCoord - coord);
+            energy += exp2(-dot(delta, delta) * expMultiplier) * iterationValue;
+        }
+    }
+
+    imageStore(blueNoiseBuffer, tileId * TILESIZE + coord, vec4(value));
+}

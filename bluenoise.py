@@ -52,6 +52,19 @@ _VIS_BLUENOISE = viewport.make_permutation_program(
     GL_FRAGMENT_SHADER = os.path.join(_SHADER_DIR, "bluenoise", "vis_bluenoise.frag")
 )
 
+
+_GEN_FFT2_P1 = viewport.make_permutation_program(
+    _DEBUGGING,
+    GL_VERTEX_SHADER = os.path.join(_SHADER_DIR, "draw_full_screen.vert"),
+    GL_FRAGMENT_SHADER = os.path.join(_SHADER_DIR, "dft", "fft2_p1.frag")
+)
+
+_GEN_FFT2_P2 = viewport.make_permutation_program(
+    _DEBUGGING,
+    GL_VERTEX_SHADER = os.path.join(_SHADER_DIR, "draw_full_screen.vert"),
+    GL_FRAGMENT_SHADER = os.path.join(_SHADER_DIR, "dft", "fft2_p2.frag")
+)
+
 class Renderer(object):
 
     def __init__(self):
@@ -92,6 +105,8 @@ class Renderer(object):
 
 
         self._tile_preview = 0
+        self._fft2_preview = 0
+        self._fft2_valid = False
 
     def run(self):
         self.window.run()
@@ -161,6 +176,41 @@ class Renderer(object):
             if new_y == 0:
                 new_y = 1
             void_and_cluster_dims = (new_x, new_y)
+
+        self._fft2_p1_program = _GEN_FFT2_P1.get(EXTRACT_RED=1)
+        self._fft2_p2_program = _GEN_FFT2_P2.get(OUTPUT_LENGTH=1)
+
+        self._fft2_p1_fb_target = viewport.FramebufferTarget(
+            GL_RG32F,
+            True,
+            custom_texture_settings={
+                GL_TEXTURE_WRAP_S: GL_REPEAT,
+                GL_TEXTURE_WRAP_T: GL_REPEAT,
+                GL_TEXTURE_MIN_FILTER: GL_NEAREST,
+                GL_TEXTURE_MAG_FILTER: GL_NEAREST,
+            }
+        )
+        self._fft2_p1_fb = viewport.Framebuffer(
+                (self._fft2_p1_fb_target,),
+                self._texture_size[0],
+                self._texture_size[1]
+            )
+
+        self._fft2_p2_fb_target = viewport.FramebufferTarget(
+            GL_R32F,
+            True,
+            custom_texture_settings={
+                GL_TEXTURE_WRAP_S: GL_REPEAT,
+                GL_TEXTURE_WRAP_T: GL_REPEAT,
+                GL_TEXTURE_MIN_FILTER: GL_NEAREST,
+                GL_TEXTURE_MAG_FILTER: GL_NEAREST,
+            }
+        )
+        self._fft2_p2_fb = viewport.Framebuffer(
+                (self._fft2_p2_fb_target,),
+                self._texture_size[0],
+                self._texture_size[1]
+            )
 
         glViewport(0, 0, wnd.width, wnd.height)
 
@@ -233,9 +283,24 @@ class Renderer(object):
                         glDrawArrays(GL_TRIANGLES, 0, 3)
                     self._iteration += 1
 
+                self._fft2_valid = False
+
                 glBlendFunc(GL_ONE, GL_ZERO)
             else:
                 break
+
+
+        if self._fft2_preview and not self._fft2_valid:
+            self._fft2_valid = True
+            glViewport(0, 0, self._texture_size[0], self._texture_size[1])
+            with self._fft2_p1_fb.bind():
+                glUseProgram(self._fft2_p1_program)
+                glBindTextureUnit(0, self._noise_energy_fb_target.texture)
+                glDrawArrays(GL_TRIANGLES, 0, 3)
+            with self._fft2_p2_fb.bind():
+                glUseProgram(self._fft2_p2_program)
+                glBindTextureUnit(0, self._fft2_p1_fb_target.texture)
+                glDrawArrays(GL_TRIANGLES, 0, 3)
 
         # Draw preview
         glViewport(0, 0, wnd.width, wnd.height)
@@ -247,9 +312,18 @@ class Renderer(object):
             glUseProgram(_VIS_BLUENOISE.get(VS_OUTPUT_UV=0))
 
         glBindTextureUnit(0, self._noise_energy_fb_target.texture)
+
         glUniform2f(0, self._texture_size[0], self._texture_size[1])
         glBindVertexArray(viewport.get_dummy_vao())
         glDrawArrays(GL_TRIANGLES, 0, 3)
+
+
+        if self._fft2_preview:
+            glUseProgram(_VIS_BLUENOISE.get(VS_OUTPUT_UV=0))
+            glBindTextureUnit(0, self._fft2_p2_fb_target.texture)
+            glUniform2f(0, self._texture_size[0], self._texture_size[1])
+            glBindVertexArray(viewport.get_dummy_vao())
+            glDrawArrays(GL_TRIANGLES, 0, 3)
 
         wnd.redraw()
 
@@ -263,6 +337,8 @@ class Renderer(object):
             self._iteration = 0
         if key == b't':
             self._tile_preview ^= 1
+        if key == b'f':
+            self._fft2_preview ^= 1
         wnd.redraw()
 
     def _drag(self, wnd, x, y, button):

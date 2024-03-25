@@ -1,0 +1,147 @@
+#ifndef DFT_GLSLI_H
+#define DFT_GLSLI_H
+
+/**
+
+Helper routine for generating DFT transforms.
+(Don't expect this to be fast for big values, which are all computed together).
+
+Example usage:
+
+    layout(set=0, binding = 0) uniform numElements_
+    {
+        int numElements;
+    }; 
+    readonly  layout(std430, binding = 0)  buffer inData_ { float inData[]; };
+    writeonly layout(std430, binding = 1) buffer outData_ { vec2 outData[]; };
+
+
+    void main()
+    {
+        DFTContext ctx = DFTContext_init(numElements, int(gl_GlobalInvocationID.x));
+        for(int i=0; i<numElements; ++i)
+        {
+            DFTContext_add(ctx, i, vec2(inData[i], 0.0));
+        }
+        outData[gl_GlobalInvocationID.x] = DFTContext_get(ctx);
+    }
+
+
+It's also possible to split up the work between different threads, by having
+then add different ranges and simply summing the result of `DFTContext_get`.
+
+e.g:
+
+    layout(set=0, binding = 0) uniform numElements_
+    {
+        int numElements;
+    }; 
+    readonly  layout(std430, binding = 0)  buffer inData_ { float inData[]; };
+    writeonly layout(std430, binding = 1) buffer outData_ { vec2 outData[]; };
+
+
+    shared vec2 lds[DISPATCH_WIDTH];
+
+    void main()
+    {
+        DFTContext ctx = DFTContext_init(numElements, int(gl_GlobalInvocationID.x));
+        int i = 0;
+        int j = numElements;
+
+        if(gl_LocalInvocationID.y == 0)
+        {
+            j = numElements / 2;
+        }
+        else
+        {
+            i = numElements / 2;
+        }
+
+        for(; i<j; ++i)
+        {
+            DFTContext_add(ctx, i, vec2(inData[i], 0.0));
+        }
+
+        if(gl_LocalInvocationID.y != 0)
+        {
+            lds[gl_LocalInvocationID.x] = DFTContext_get(ctx);
+        }
+        barrier();
+
+        if(gl_LocalInvocationID.y == 0)
+        {
+            outData[gl_GlobalInvocationID.x] = DFTContext_get(ctx) + lds[gl_LocalInvocationID.x];
+            
+        }
+    }
+**/
+
+
+struct DFTContext
+{
+    float   multiplier;
+    vec2    accum;
+    float   rescale;
+};
+
+
+// Initialise a DFT Context
+// size     = number of elements in array
+// index    = target index in the array
+DFTContext DFTContext_init(float size, float index)
+{
+    const float tau = 6.2831853071795864769252867665590;
+    const float pi  = 3.1415926535897932384626433832795;
+    float invsize = 1.0 / size;
+    float u = index * invsize;
+    DFTContext result;
+    result.multiplier = -tau * u + pi;
+    result.accum = vec2(0.0);
+    result.rescale = sqrt(invsize);
+    return result;
+}
+
+DFTContext DFTContext_init(float size, int index)
+{
+    return DFTContext_init(size, float(index));
+}
+
+DFTContext DFTContext_init(int size, float index)
+{
+    return DFTContext_init(float(size), index);
+}
+
+DFTContext DFTContext_init(int size, int index)
+{
+    return DFTContext_init(float(size), float(index));
+}
+
+
+// Accumulate a value into the context
+// ctx      = context to write back too
+// index    = index in array
+// value    = value of index
+void DFTContext_add(inout DFTContext ctx, float index, vec2 value)
+{
+    float theta = ctx.multiplier * index;
+    float ax = cos(theta);
+    float ay = sin(theta);
+    ctx.accum += vec2(value.x * ax - value.y * ay,
+                      value.x * ay + value.y * ax);
+}
+
+void DFTContext_add(inout DFTContext ctx, int index, vec2 value)
+{
+    DFTContext_add(ctx, float(index), value);
+}
+
+
+// Get the final result.
+// ctx      = context to read from.
+vec2 DFTContext_get(const DFTContext ctx)
+{
+    return ctx.accum * ctx.rescale;
+}
+
+
+#endif // DFT_GLSLI_H
