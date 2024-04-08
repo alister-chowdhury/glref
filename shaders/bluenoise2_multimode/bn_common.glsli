@@ -1,0 +1,310 @@
+#ifndef BN_COMMON_GLSLI_H
+#define BN_COMMON_GLSLI_H
+
+
+// Top left square pass
+// 2x2        3x3          4x4            5x4          4x5            5x5
+// X -      X - -      X - X -      X - X - -      X - X -      X - X - -
+// - -      - - -      - - - -      - - - - -      - - - -      - - - - -
+//          - - -      X - X -      X - X - -      X - X -      X - X - -
+//                     - - - -      - - - - -      - - - -      - - - - -
+//                                                 - - - -      - - - - -
+#define BN_TILE_MODE_SQ_00  0
+
+// Bottom right square pass
+// 2x2        3x3          4x4            5x4          4x5            5x5
+// - -      - - -      - - - -      - - - - -      - - - -      - - - - -
+// - X      - X -      - X - X      - X - X -      - X - X      - X - X -
+//          - - -      - - - -      - - - - -      - - - -      - - - - -
+//                     - X - X      - X - X -      - X - X      - X - X -
+//                                                 - - - -      - - - - -
+#define BN_TILE_MODE_SQ_11  1
+
+// Odd width pass #1
+// 2x2        3x3          4x4            5x4          4x5            5x5
+// - -      - - X      - - - -      - - - - X      - - - -      - - - - X
+// - -      - - -      - - - -      - - - - -      - - - -      - - - - -
+//          - - -      - - - -      - - - - X      - - - -      - - - - X
+//                     - - - -      - - - - -      - - - -      - - - - -
+//                                                 - - - -      - - - - -
+#define BN_TILE_MODE_ODD_W0 2
+
+// Odd height pass #1
+// 2x2        3x3          4x4            5x4          4x5            5x5
+// - -      - - -      - - - -      - - - - -      - - - -      - - - - -
+// - -      - - -      - - - -      - - - - -      - - - -      - - - - -
+//          X - -      - - - -      - - - - -      - - - -      - - - - -
+//                     - - - -      - - - - -      - - - -      - - - - -
+//                                                 X - X -      X - X - -
+#define BN_TILE_MODE_ODD_H0 3
+
+// Top right square pass
+// 2x2        3x3          4x4            5x4          4x5            5x5
+// - X      - X -      - X - X      - X - X -      - X - X      - X - X -
+// - -      - - -      - - - -      - - - - -      - - - -      - - - - -
+//          - - -      - X - X      - X - X -      - X - X      - X - X -
+//                     - - - -      - - - - -      - - - -      - - - - -
+//                                                 - - - -      - - - - -
+#define BN_TILE_MODE_SQ_10  4
+
+// Bottom left square pass
+// 2x2        3x3          4x4            5x4          4x5            5x5
+// - -      - - -      - - - -      - - - - -      - - - -      - - - - -
+// X -      X - -      X - X -      X - X - -      X - X -      X - X - -
+//          - - -      - - - -      - - - - -      - - - -      - - - - -
+//                     X - X -      X - X - -      X - X -      X - X - -
+//                                                 - - - -      - - - - -
+#define BN_TILE_MODE_SQ_01  5
+
+// Odd width pass #2
+// 2x2        3x3          4x4            5x4          4x5            5x5
+// - -      - - -      - - - -      - - - - -      - - - -      - - - - -
+// - -      - - X      - - - -      - - - - X      - - - -      - - - - X
+//          - - -      - - - -      - - - - -      - - - -      - - - - -
+//                     - - - -      - - - - X      - - - -      - - - - X
+//                                                 - - - -      - - - - -
+#define BN_TILE_MODE_ODD_W1 6
+
+
+// Odd height #2
+// 2x2        3x3          4x4            5x4          4x5            5x5
+// - -      - - -      - - - -      - - - - -      - - - -      - - - - -
+// - -      - - -      - - - -      - - - - -      - - - -      - - - - -
+//          - X -      - - - -      - - - - -      - - - -      - - - - -
+//                     - - - -      - - - - X      - - - -      - - - - -
+//                                                 - X - X      - X - X -
+#define BN_TILE_MODE_ODD_H1 7
+
+// Odd width and height corner pass
+// 2x2        3x3          4x4            5x4          4x5            5x5
+// - -      - - -      - - - -      - - - - -      - - - -      - - - - -
+// - -      - - -      - - - -      - - - - -      - - - -      - - - - -
+//          - - X      - - - -      - - - - -      - - - -      - - - - -
+//                     - - - -      - - - - -      - - - -      - - - - -
+//                                                 - - - -      - - - - X
+#define BN_TILE_MODE_CORNER 8
+
+
+struct DeriveTileParams
+{
+    int     tileMode;
+    ivec2   dispatchId;
+    ivec2   tileDimensions;
+};
+
+
+ivec2 deriveTileId(DeriveTileParams info)
+{
+    switch(info.tileMode)
+    {
+        // Squares
+        case BN_TILE_MODE_SQ_00: return info.dispatchId * 2;
+        case BN_TILE_MODE_SQ_10: return info.dispatchId * 2 + ivec2(1, 0);
+        case BN_TILE_MODE_SQ_01: return info.dispatchId * 2 + ivec2(0, 1);
+        case BN_TILE_MODE_SQ_11: return info.dispatchId * 2 + ivec2(1, 1);
+
+        // Odd width
+        case BN_TILE_MODE_ODD_W0: return ivec2(info.tileDimensions.x - 1, info.dispatchId.y * 2);
+        case BN_TILE_MODE_ODD_W1: return ivec2(info.tileDimensions.x - 1, info.dispatchId.y * 2 + 1);
+        
+        // Odd height
+        case BN_TILE_MODE_ODD_H0: return ivec2(info.dispatchId.x * 2, info.tileDimensions.y - 1);
+        case BN_TILE_MODE_ODD_H1: return ivec2(info.dispatchId.x * 2 + 1, info.tileDimensions.y - 1);
+
+    };
+
+    // else BN_TILE_MODE_CORNER
+    return info.tileDimensions - 1;
+}
+
+
+ivec2 deriveDispatchSizes(int tileMode, ivec2 tileDimensions)
+{
+    ivec2 squareDim = tileDimensions / 2;
+    int oddWidth = tileDimensions.x & 1;
+    int oddHeight = tileDimensions.y & 1;
+    switch(tileMode)
+    {
+        // Squares
+        case BN_TILE_MODE_SQ_00:
+        case BN_TILE_MODE_SQ_10:
+        case BN_TILE_MODE_SQ_01:
+        case BN_TILE_MODE_SQ_11:
+        {
+            return squareDim;
+        }
+
+        case BN_TILE_MODE_ODD_W0:
+        case BN_TILE_MODE_ODD_W1:
+        {
+            return ivec2(oddWidth, squareDim.y);
+        }
+
+        case BN_TILE_MODE_ODD_H0:
+        case BN_TILE_MODE_ODD_H1:
+        {
+            return ivec2(squareDim.x, oddHeight);
+        }
+    }
+
+    // else BN_TILE_MODE_CORNER
+    return ivec2(oddWidth, oddHeight);
+}
+
+// Full tile mode stuff
+#define BN_FULL_TILE_INCLUDE_NONE 0u
+#define BN_FULL_TILE_INCLUDE_L    (1u << 0)
+#define BN_FULL_TILE_INCLUDE_T    (1u << 1)
+#define BN_FULL_TILE_INCLUDE_R    (1u << 2)
+#define BN_FULL_TILE_INCLUDE_B    (1u << 3)
+#define BN_FULL_TILE_INCLUDE_TL   (1u << 4)
+#define BN_FULL_TILE_INCLUDE_TR   (1u << 5)
+#define BN_FULL_TILE_INCLUDE_BR   (1u << 6)
+#define BN_FULL_TILE_INCLUDE_BL   (1u << 7)
+
+#define BN_FULL_TILE_INCLUDE_SIDES  (BN_FULL_TILE_INCLUDE_L  \
+                                   | BN_FULL_TILE_INCLUDE_T  \
+                                   | BN_FULL_TILE_INCLUDE_R  \
+                                   | BN_FULL_TILE_INCLUDE_B  )
+
+#define BN_FULL_TILE_INCLUDE_CORNERS    (BN_FULL_TILE_INCLUDE_TL \
+                                       | BN_FULL_TILE_INCLUDE_TR \
+                                       | BN_FULL_TILE_INCLUDE_BR \
+                                       | BN_FULL_TILE_INCLUDE_BL)
+
+#define BN_FULL_TILE_INCLUDE_ALL  (BN_FULL_TILE_INCLUDE_SIDES | BN_FULL_TILE_INCLUDE_CORNERS)
+
+
+// When evaluating a full tile, which neighbouring tiles should
+// we fetch energy information from.
+// Additionally, we should wrap around in the direction of any tile
+// we haven't already sampled, to approximate tiling for a space
+// that hasn't been filled in yet.
+uint getFullTileNeighbourSampleTiles(DeriveTileParams info)
+{
+
+    ivec2 squareDim = info.tileDimensions / 2;
+    int oddWidth = info.tileDimensions.x & 1;
+    int oddHeight = info.tileDimensions.y & 1;
+
+    switch(info.tileMode)
+    {
+        // First tile never needs to sample anything.
+        case BN_TILE_MODE_SQ_00: return BN_FULL_TILE_INCLUDE_NONE;
+
+        // Second tile will generally just want corners, unless
+        // there is a odd width and height, then corners in those
+        // directions can't be used.
+        case BN_TILE_MODE_SQ_11:
+        {
+            uint flags = BN_FULL_TILE_INCLUDE_CORNERS;
+            if(((oddWidth) == 1) && (info.dispatchId.x == (squareDim.x - 1)))
+            {
+                flags &= ~(BN_FULL_TILE_INCLUDE_BR | BN_FULL_TILE_INCLUDE_TR);
+            }
+            if(((oddHeight) == 1) && (info.dispatchId.y == (squareDim.y - 1)))
+            {
+                flags &= ~(BN_FULL_TILE_INCLUDE_BL | BN_FULL_TILE_INCLUDE_BR);
+            }
+            return flags;
+        }
+
+        // Generally needs to be all sides, except if the height
+        // is odd, in which case the first row can't sample up, but can
+        // sample the top left and top right (except for top right most pixel).
+        case BN_TILE_MODE_SQ_10:
+        {
+            uint flags = BN_FULL_TILE_INCLUDE_SIDES;
+            if((oddHeight == 1) && (info.dispatchId.y == 0))
+            {
+                flags &= ~BN_FULL_TILE_INCLUDE_T;
+                flags |=  BN_FULL_TILE_INCLUDE_TL;
+                if(!((oddHeight == 1) && (info.dispatchId.x == (squareDim.y - 1))))
+                {
+                    flags |= BN_FULL_TILE_INCLUDE_TR;
+                }
+            }
+            return flags;
+        }
+
+        // Generally needs to be all, except if the width
+        // is odd, in which case the first row can't sample left.
+        case BN_TILE_MODE_SQ_01:
+        {
+            uint flags = BN_FULL_TILE_INCLUDE_ALL;
+            if((oddWidth == 1) && (info.dispatchId.x == 0))
+            {
+                flags &= ~BN_FULL_TILE_INCLUDE_L;
+            }
+            if((oddHeight == 1) && (info.dispatchId.y == (squareDim.y - 1)))
+            {
+                flags &= ~(BN_FULL_TILE_INCLUDE_BL | BN_FULL_TILE_INCLUDE_BR);
+            }
+            return flags;
+        }
+        
+        // Will need top left and bottom left, unless
+        // there is an odd height, then the top most cannot
+        // sample top left.
+        case BN_TILE_MODE_ODD_W0:
+        {
+            uint flags = BN_FULL_TILE_INCLUDE_BL | BN_FULL_TILE_INCLUDE_TL;
+            if((oddHeight == 1) && (info.dispatchId.y == 0))
+            {
+                flags &= ~BN_FULL_TILE_INCLUDE_TL;
+            }
+            return flags;
+        }
+
+        // Will need to be all, unless there is an odd height, then
+        // the bottom most pixel can't sample bottom left or bottom.
+        case BN_TILE_MODE_ODD_W1:
+        {
+            uint flags = BN_FULL_TILE_INCLUDE_ALL;
+            if((oddHeight == 1) && (info.dispatchId.y == (squareDim.y - 1)))
+            {
+                flags &= ~(BN_FULL_TILE_INCLUDE_B | BN_FULL_TILE_INCLUDE_BL);
+            }
+            return flags;
+        }
+
+        // Will need top left and top right, unless
+        // there is an odd width, then the left most cannot
+        // sample top left.
+        case BN_TILE_MODE_ODD_H0:
+        {
+            uint flags = BN_FULL_TILE_INCLUDE_TL | BN_FULL_TILE_INCLUDE_TR;
+            if((oddWidth == 1) && (info.dispatchId.x == 0))
+            {
+                flags &= ~BN_FULL_TILE_INCLUDE_TL;
+                flags |= BN_FULL_TILE_INCLUDE_BL;
+            }
+            return flags;
+        }
+
+        // Will need to be all, unless there is an odd width, then
+        // the right most pixel can't sample right.
+        case BN_TILE_MODE_ODD_H1:
+        {
+            uint flags = BN_FULL_TILE_INCLUDE_ALL;
+            if((oddWidth == 1) && (info.dispatchId.x == (squareDim.x - 1)))
+            {
+                flags &= ~BN_FULL_TILE_INCLUDE_R;
+            }
+            return flags;
+        }
+    }
+
+    // else BN_TILE_MODE_CORNER
+
+    // Processing a single 1x1 tile
+    if((info.tileDimensions.x == 1) || (info.tileDimensions.y == 1))
+    {
+        return BN_FULL_TILE_INCLUDE_NONE;
+    }
+    return BN_FULL_TILE_INCLUDE_ALL;
+}
+
+
+
+#endif // BN_COMMON_GLSLI_H

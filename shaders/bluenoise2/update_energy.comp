@@ -1,0 +1,45 @@
+#version 460 core
+
+#ifndef TILE_SIZE
+#define TILE_SIZE 8
+#endif // TILE_SIZE
+
+
+layout(local_size_x=TILE_SIZE, local_size_y=TILE_SIZE) in;
+
+
+layout(binding=0, r32f)             uniform image2D inOutEnergy;
+readonly layout(binding=1, rgba32f) uniform image2D tilePicks;
+
+
+layout(location=0)  uniform ivec2 tileIdOffset;
+layout(location=1)  uniform ivec2 numTiles;
+layout(location=2)  uniform float expMultiplier;
+
+
+void main()
+{
+    ivec2 innerCoord = ivec2(gl_LocalInvocationID.xy);
+    vec2 innerCoordF = vec2(innerCoord);
+    ivec2 tileId = ivec2(gl_WorkGroupID.xy) * 2 + tileIdOffset;
+    ivec2 targetPixel = tileId * TILE_SIZE + innerCoord;
+
+    float totalEnergy = 0.0;
+
+    for(int dy=-1; dy<=1; ++dy)
+    for(int dx=-1; dx<=1; ++dx)
+    {
+        ivec2 offset = tileId + ivec2(dx, dy);
+        if(offset.x < 0) { offset.x += numTiles.x; }
+        if(offset.y < 0) { offset.y += numTiles.y; }
+        if(offset.x >= numTiles.x) { offset.x -= numTiles.x; }
+        if(offset.y >= numTiles.y) { offset.y -= numTiles.y; }
+    
+        vec4 tileData = imageLoad(tilePicks, offset);
+        vec2 rel = vec2(dx, dy) * float(TILE_SIZE) + tileData.xy - innerCoordF;
+        float energy = exp2(-dot(rel, rel) * expMultiplier) * tileData.z;
+        totalEnergy += energy;
+    }
+
+    imageStore(inOutEnergy, targetPixel, vec4(totalEnergy + imageLoad(inOutEnergy, targetPixel).x));
+}

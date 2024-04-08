@@ -1,0 +1,117 @@
+#version 460 core
+
+#ifndef TILE_SIZE
+#define TILE_SIZE 8
+#endif // TILE_SIZE
+
+
+layout(local_size_x=TILE_SIZE, local_size_y=TILE_SIZE) in;
+
+
+readonly  layout(binding=0, r32f)     uniform image2D energy;
+          layout(binding=1, r32f)     uniform image2D inOutBNValue;
+writeonly layout(binding=2, rgba32f)  uniform image2D outTilePicks;
+
+
+layout(location=0)  uniform ivec2 tileIdOffset;
+layout(location=1)  uniform float writeValue;
+layout(location=2)  uniform uint  randomSeed;
+
+
+uint simpleHash32(uvec3 Seed)
+{
+    uint hx = (0xb543c3a6u ^ Seed.x);
+    uint hy = (0x526f94e2u ^ Seed.y);
+    uint hxy = hx * hy;
+    uint hz0 = 0x53c5ca59u ^ (hxy >> 5u);
+    uint hz1 = (0x74743c1bu ^ Seed.z);
+    uint h = hz0 * hz1;
+    return h;
+}
+
+
+shared float energyBufferLDS[TILE_SIZE * TILE_SIZE];
+#define LDS_OFFSET(v) ((v).y * TILE_SIZE + (v).x)
+
+
+float getCurrentEnergy(ivec2 coord)
+{
+    if(imageLoad(inOutBNValue, coord).x == 0.0)
+    {
+        return imageLoad(energy, coord).x;
+    }
+
+    // Ignore pixels that have already been filled in by
+    // saying their current energy is obscenely high, thus
+    // preventing them from even being picked.
+    return 1e+35;
+}
+
+
+void main()
+{
+
+    ivec2 innerCoord = ivec2(gl_LocalInvocationID.xy);
+    ivec2 tileId = ivec2(gl_WorkGroupID.xy) * 2 + tileIdOffset;
+
+    ivec2 start = tileId * TILE_SIZE;
+    ivec2 targetPixel = start + innerCoord;
+
+    // This is a waste of threads, todo try:
+    // when targetting tile sizes of 8x8,   target 8 different tiles
+    // when targetting tile sizes of 16x16, target 4 different tiles
+    energyBufferLDS[LDS_OFFSET(innerCoord)] = getCurrentEnergy(targetPixel);
+
+    uint yh = simpleHash32(uvec3(uvec2(start) + 1u, randomSeed)) >> 3;
+    uint xh = simpleHash32(uvec3(uvec2(start) + uvec2(13u, 11u), yh)) >> 5;
+
+    barrier();
+
+    // Reduce vertically, attempting to avoid a bank conflict
+    if(innerCoord.y == 0)
+    {
+        int x = innerCoord.x;
+        int voidY = int(yh & (TILE_SIZE - 1));
+        float voidValue = energyBufferLDS[LDS_OFFSET(ivec2(x, voidY))];
+        
+        for(uint yit=1u; yit < uint(TILE_SIZE); ++yit)
+        {
+            int y = int((yh ^ yit) & (TILE_SIZE - 1));
+            float currentVoid = energyBufferLDS[LDS_OFFSET(ivec2(x, y))];   
+            if(currentVoid < voidValue)
+            {
+                voidValue = currentVoid;
+                voidY = y;
+            }
+        }
+
+        // Write back into memory only accessed by this thread
+        energyBufferLDS[LDS_OFFSET(ivec2(x, 0))] = voidValue;
+        energyBufferLDS[LDS_OFFSET(ivec2(x, 1))] = intBitsToFloat(voidY);
+    }
+    barrier();
+
+
+    // Reduce horizonatally and output the result
+    if(innerCoord.x == 0 && innerCoord.y == 0)
+    {
+        int voidX = int(xh & (TILE_SIZE - 1));
+        float voidValue = energyBufferLDS[LDS_OFFSET(ivec2(voidX, 0))];
+        ivec2 voidCoord = ivec2(voidX, floatBitsToInt(energyBufferLDS[LDS_OFFSET(ivec2(voidX, 1))]));
+
+        for(uint xit=1u; xit < uint(TILE_SIZE); ++xit)
+        {
+            int x = int((xh ^ xit) & (TILE_SIZE - 1));
+            float currentVoidValue = energyBufferLDS[LDS_OFFSET(ivec2(x, 0))];
+            if(currentVoidValue < voidValue)
+            {
+                voidValue = currentVoidValue;
+                voidCoord = ivec2(x, floatBitsToInt(energyBufferLDS[LDS_OFFSET(ivec2(x, 1))]));
+            }
+        }
+
+        imageStore(outTilePicks, tileId, vec4(voidCoord, writeValue, 0));
+        imageStore(inOutBNValue, start + voidCoord, vec4(writeValue));
+    }
+
+}
