@@ -61,8 +61,11 @@ class Renderer(object):
         self._tile_size = 8
         self._num_tiles = (32, 32)
 
-        # self._tile_size = 16
-        # self._num_tiles = (16, 16)
+        self._tile_size = 16
+        self._num_tiles = (16, 16)
+
+        self._tile_size = 32
+        self._num_tiles = (8, 8)
 
         self._iteration = 0
         self._max_iterations_for_all_passes = self._tile_size * self._tile_size
@@ -96,6 +99,8 @@ class Renderer(object):
             )
         )
 
+        self._reusable_tile_update_buffers = []
+
         self.timer_overlay = perf_overlay_lib.TimerSamples256Overlay()
 
         self._tile_preview = 0
@@ -106,7 +111,7 @@ class Renderer(object):
 
         self._store_pixels_dir = None
         self._store_pixels_it = 0
-        self._store_pixels_max = 4
+        self._store_pixels_max = 1
         self._storing_pixels = False
 
     def run(self):
@@ -200,6 +205,8 @@ class Renderer(object):
         self._void_and_cluster_pick_program = _VOID_AND_CLUSTER_PICK.get(TILE_SIZE=self._tile_size)
         self._void_and_cluster_update_energy_program = _VOID_AND_CLUSTER_UPDATE_ENERGY.get(TILE_SIZE=self._tile_size)
 
+        # _VOID_AND_CLUSTER_UPDATE_ENERGY.get(TILE_SIZE=self._tile_size, USE_IMAGE_BUFFERS=0)
+
         self._energy_texture_ptr = ctypes.c_int()
         glCreateTextures(GL_TEXTURE_2D, 1, self._energy_texture_ptr)
         self._energy_texture = self._energy_texture_ptr.value
@@ -290,7 +297,8 @@ class Renderer(object):
             glClearTexImage(self._value_texture, 0, GL_RGBA, GL_FLOAT, clear_value)
             glClearTexImage(self._pick_texture, 0, GL_RGBA, GL_FLOAT, clear_value)
 
-        for _ in range(self._max_iterations_per_frame):
+
+        for iteration_index in range(self._max_iterations_per_frame):
             
             if self._iteration >= self._max_iterations_for_all_passes:
                 break
@@ -298,6 +306,24 @@ class Renderer(object):
             self._fft2_valid = False
             write_value = 1 - self._iteration / (self._max_iterations_for_all_passes - 1)
             self._iteration += 1
+
+            if iteration_index >= len(self._reusable_tile_update_buffers):
+                per_iteration_buffers_ptr = (ctypes.c_int * 4)()
+                glCreateBuffers(4, per_iteration_buffers_ptr)
+                for linear_tile_id in range(4):
+                    glNamedBufferStorage(
+                        per_iteration_buffers_ptr[linear_tile_id],
+                        4 * 4 * 2,
+                        None,
+                        GL_DYNAMIC_STORAGE_BIT
+                    )
+                self._reusable_tile_update_buffers.append(
+                    per_iteration_buffers_ptr
+                )
+            else:
+                per_iteration_buffers_ptr = (
+                    self._reusable_tile_update_buffers[iteration_index]
+                )
 
             for linear_tile_id in range(4):
                 if linear_tile_id == 0:
@@ -313,24 +339,43 @@ class Renderer(object):
                     tile_offset_x = 0
                     tile_offset_y = 1
 
+                tile_update_data = numpy.array(
+                    [
+                        numpy.int32(tile_offset_x).view(numpy.float32), # tileIdOffset.x
+                        numpy.int32(tile_offset_y).view(numpy.float32), # tileIdOffset.y
+                        numpy.int32(self._num_tiles[0]).view(numpy.float32), # numTiles.x
+                        numpy.int32(self._num_tiles[1]).view(numpy.float32), # numTiles.y
+
+                        self._exp_multiplier,                                           # expMultiplier
+                        write_value,                                                    # writeValue
+                        numpy.uint32(random.randint(0, 0x7fffff)).view(numpy.float32),  # randomSeed
+                        # Padding
+                        0,
+                    ],
+                    dtype=numpy.float32
+                ).tobytes()
+
+                target_buffer = per_iteration_buffers_ptr[linear_tile_id]
+                glNamedBufferSubData(
+                    target_buffer,
+                    0,
+                    len(tile_update_data),
+                    tile_update_data
+                )
 
                 glUseProgram(self._void_and_cluster_update_energy_program)
-                glBindImageTexture(0, self._energy_texture, 0, 0, 0, GL_READ_WRITE, GL_R32F)
-                glBindImageTexture(1, self._pick_texture, 0, 0, 0, GL_READ_ONLY, GL_RGBA32F)
-                glUniform2i(0, tile_offset_x, tile_offset_y)
-                glUniform2i(1, self._num_tiles[0], self._num_tiles[1])
-                glUniform1f(2, self._exp_multiplier)
+                glBindBufferBase(GL_UNIFORM_BUFFER, 0, target_buffer)
+                glBindImageTexture(1, self._energy_texture, 0, 0, 0, GL_READ_WRITE, GL_R32F)
+                glBindImageTexture(2, self._pick_texture, 0, 0, 0, GL_READ_ONLY, GL_RGBA32F)
                 glDispatchCompute(self._num_tiles[0]//2, self._num_tiles[1]//2, 1)
 
                 glMemoryBarrier(GL_SHADER_IMAGE_ACCESS_BARRIER_BIT)
 
                 glUseProgram(self._void_and_cluster_pick_program)
-                glBindImageTexture(0, self._energy_texture, 0, 0, 0, GL_READ_ONLY, GL_R32F)
-                glBindImageTexture(1, self._value_texture, 0, 0, 0, GL_READ_WRITE, GL_R32F)
-                glBindImageTexture(2, self._pick_texture, 0, 0, 0, GL_WRITE_ONLY, GL_RGBA32F)
-                glUniform2i(0, tile_offset_x, tile_offset_y)
-                glUniform1f(1, write_value)
-                glUniform1ui(2, random.randint(0, 0x7fffff))
+                glBindBufferBase(GL_UNIFORM_BUFFER, 0, target_buffer)
+                glBindImageTexture(1, self._energy_texture, 0, 0, 0, GL_READ_ONLY, GL_R32F)
+                glBindImageTexture(2, self._value_texture, 0, 0, 0, GL_READ_WRITE, GL_R32F)
+                glBindImageTexture(3, self._pick_texture, 0, 0, 0, GL_WRITE_ONLY, GL_RGBA32F)
                 glDispatchCompute(self._num_tiles[0]//2, self._num_tiles[1]//2, 1)
                 
                 glMemoryBarrier(GL_SHADER_IMAGE_ACCESS_BARRIER_BIT)
