@@ -1,4 +1,5 @@
 from OpenGL.GLUT import *
+from OpenGL.GL import GL_DEBUG_OUTPUT, glEnable
 
 
 __all__ = ("Window",)
@@ -31,9 +32,13 @@ class Window(object):
         self._last_drag_x = 0
         self._last_drag_y = 0
 
-    def run(self):
+    def run(self, debug=True):
         glutInitContextVersion(4, 6)
-        glutInitContextProfile(GLUT_CORE_PROFILE)
+
+        initflags = GLUT_CORE_PROFILE
+        if debug:
+            initflags |= GLUT_DEBUG
+        glutInitContextProfile(initflags)
         glutInitContextFlags(GLUT_FORWARD_COMPATIBLE)
         glutInit()
         glutInitDisplayMode(GLUT_RGBA|GLUT_DEPTH|GLUT_STENCIL|GLUT_DOUBLE)
@@ -47,6 +52,9 @@ class Window(object):
         glutKeyboardFunc(self._keypress)
         glutMouseFunc(self._mouse)
         glutMotionFunc(self._drag)
+
+        if debug:
+            glEnable(GL_DEBUG_OUTPUT)
 
         if self.on_init:
             self.on_init(self)

@@ -517,19 +517,16 @@ class Renderer(object):
                 
                 glMemoryBarrier(GL_SHADER_IMAGE_ACCESS_BARRIER_BIT | GL_SHADER_STORAGE_BARRIER_BIT)
 
-            glMemoryBarrier(GL_SHADER_IMAGE_ACCESS_BARRIER_BIT | GL_SHADER_STORAGE_BARRIER_BIT)
 
-
+        glBindVertexArray(viewport.get_dummy_vao())
+        
         if not self._use_storage_images:
             glViewport(0, 0, self._texture_size[0], self._texture_size[1])
             with self._buffer_to_image_fb.bind():
                 glUseProgram(self._buffer_to_image_program)
                 glBindBufferBase(GL_UNIFORM_BUFFER, 0, self._buffer_to_image_params)
                 glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 1, self._value_buffer)
-                try:
-                    glDrawArrays(GL_TRIANGLES, 0, 3)
-                except Exception as e:
-                    print(e)
+                glDrawArrays(GL_TRIANGLES, 0, 3)
 
 
         if (self._fft2_preview or self._storing_pixels) and not self._fft2_valid:
@@ -555,15 +552,12 @@ class Renderer(object):
 
         glBindTextureUnit(0, self._value_texture)
         glUniform2f(0, self._texture_size[0], self._texture_size[1])
-        glBindVertexArray(viewport.get_dummy_vao())
         glDrawArrays(GL_TRIANGLES, 0, 3)
-
 
         if self._fft2_preview:
             glUseProgram(_VIS_BLUENOISE.get(VS_OUTPUT_UV=0))
             glBindTextureUnit(0, self._fft2_p2_fb_target.texture)
             glUniform2f(0, self._texture_size[0], self._texture_size[1])
-            glBindVertexArray(viewport.get_dummy_vao())
             glDrawArrays(GL_TRIANGLES, 0, 3)
 
         if self._cycle_noise:
