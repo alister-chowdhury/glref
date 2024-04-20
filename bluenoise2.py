@@ -28,6 +28,12 @@ _VOID_AND_CLUSTER_PICK = viewport.make_permutation_program(
     GL_COMPUTE_SHADER = os.path.join(_SHADER_DIR, "bluenoise2", "pick.comp")
 )
 
+_BUFFER_TO_IMAGE = viewport.make_permutation_program(
+    _DEBUGGING,
+    GL_VERTEX_SHADER = os.path.join(_SHADER_DIR, "draw_full_screen.vert"),
+    GL_FRAGMENT_SHADER = os.path.join(_SHADER_DIR, "bluenoise2", "buffer_to_image.frag")
+)
+
 _VIS_BLUENOISE = viewport.make_permutation_program(
     _DEBUGGING,
     GL_VERTEX_SHADER = os.path.join(_SHADER_DIR, "draw_full_screen.vert"),
@@ -57,6 +63,8 @@ class Renderer(object):
         self.window.on_resize = self._resize
         self.window.on_drag = self._drag
         self.window.on_keypress = self._keypress
+
+        self._use_storage_images = False
 
         self._tile_size = 8
         self._num_tiles = (32, 32)
@@ -201,56 +209,143 @@ class Renderer(object):
 
 
     def _init(self, wnd):
+
         glClearColor(0.0, 0.0, 0.0, 0.0)
-        self._void_and_cluster_pick_program = _VOID_AND_CLUSTER_PICK.get(TILE_SIZE=self._tile_size)
-        self._void_and_cluster_update_energy_program = _VOID_AND_CLUSTER_UPDATE_ENERGY.get(TILE_SIZE=self._tile_size)
-
-        # _VOID_AND_CLUSTER_UPDATE_ENERGY.get(TILE_SIZE=self._tile_size, USE_IMAGE_BUFFERS=0)
-
-        self._energy_texture_ptr = ctypes.c_int()
-        glCreateTextures(GL_TEXTURE_2D, 1, self._energy_texture_ptr)
-        self._energy_texture = self._energy_texture_ptr.value
-        glTextureParameteri(self._energy_texture, GL_TEXTURE_WRAP_S, GL_REPEAT)
-        glTextureParameteri(self._energy_texture, GL_TEXTURE_WRAP_T, GL_REPEAT)
-        glTextureParameteri(self._energy_texture, GL_TEXTURE_MIN_FILTER, GL_NEAREST)
-        glTextureParameteri(self._energy_texture, GL_TEXTURE_MAG_FILTER, GL_NEAREST)
-        glTextureStorage2D(
-            self._energy_texture,
-            1,
-            GL_R32F,
-            self._texture_size[0],
-            self._texture_size[1]
+        self._void_and_cluster_pick_program = _VOID_AND_CLUSTER_PICK.get(
+            TILE_SIZE=self._tile_size,
+            USE_IMAGE_BUFFERS=int(self._use_storage_images)
+        )
+        self._void_and_cluster_update_energy_program = _VOID_AND_CLUSTER_UPDATE_ENERGY.get(
+            TILE_SIZE=self._tile_size,
+            USE_IMAGE_BUFFERS=int(self._use_storage_images)
         )
 
-        self._value_texture_ptr = ctypes.c_int()
-        glCreateTextures(GL_TEXTURE_2D, 1, self._value_texture_ptr)
-        self._value_texture = self._value_texture_ptr.value
-        glTextureParameteri(self._value_texture, GL_TEXTURE_WRAP_S, GL_REPEAT)
-        glTextureParameteri(self._value_texture, GL_TEXTURE_WRAP_T, GL_REPEAT)
-        glTextureParameteri(self._value_texture, GL_TEXTURE_MIN_FILTER, GL_NEAREST)
-        glTextureParameteri(self._value_texture, GL_TEXTURE_MAG_FILTER, GL_NEAREST)
-        glTextureStorage2D(
-            self._value_texture,
-            1,
-            GL_R32F,
-            self._texture_size[0],
-            self._texture_size[1]
-        )
+        if self._use_storage_images:
+            self._energy_texture_ptr = ctypes.c_int()
+            glCreateTextures(GL_TEXTURE_2D, 1, self._energy_texture_ptr)
+            self._energy_texture = self._energy_texture_ptr.value
+            glTextureParameteri(self._energy_texture, GL_TEXTURE_WRAP_S, GL_REPEAT)
+            glTextureParameteri(self._energy_texture, GL_TEXTURE_WRAP_T, GL_REPEAT)
+            glTextureParameteri(self._energy_texture, GL_TEXTURE_MIN_FILTER, GL_NEAREST)
+            glTextureParameteri(self._energy_texture, GL_TEXTURE_MAG_FILTER, GL_NEAREST)
+            glTextureStorage2D(
+                self._energy_texture,
+                1,
+                GL_R32F,
+                self._texture_size[0],
+                self._texture_size[1]
+            )
 
-        self._pick_texture_ptr = ctypes.c_int()
-        glCreateTextures(GL_TEXTURE_2D, 1, self._pick_texture_ptr)
-        self._pick_texture = self._pick_texture_ptr.value
-        glTextureParameteri(self._pick_texture, GL_TEXTURE_WRAP_S, GL_REPEAT)
-        glTextureParameteri(self._pick_texture, GL_TEXTURE_WRAP_T, GL_REPEAT)
-        glTextureParameteri(self._pick_texture, GL_TEXTURE_MIN_FILTER, GL_NEAREST)
-        glTextureParameteri(self._pick_texture, GL_TEXTURE_MAG_FILTER, GL_NEAREST)
-        glTextureStorage2D(
-            self._pick_texture,
-            1,
-            GL_RGBA32F,
-            self._num_tiles[0],
-            self._num_tiles[1]
-        )
+            self._value_texture_ptr = ctypes.c_int()
+            glCreateTextures(GL_TEXTURE_2D, 1, self._value_texture_ptr)
+            self._value_texture = self._value_texture_ptr.value
+            glTextureParameteri(self._value_texture, GL_TEXTURE_WRAP_S, GL_REPEAT)
+            glTextureParameteri(self._value_texture, GL_TEXTURE_WRAP_T, GL_REPEAT)
+            glTextureParameteri(self._value_texture, GL_TEXTURE_MIN_FILTER, GL_NEAREST)
+            glTextureParameteri(self._value_texture, GL_TEXTURE_MAG_FILTER, GL_NEAREST)
+            glTextureStorage2D(
+                self._value_texture,
+                1,
+                GL_R32F,
+                self._texture_size[0],
+                self._texture_size[1]
+            )
+
+            self._pick_texture_ptr = ctypes.c_int()
+            glCreateTextures(GL_TEXTURE_2D, 1, self._pick_texture_ptr)
+            self._pick_texture = self._pick_texture_ptr.value
+            glTextureParameteri(self._pick_texture, GL_TEXTURE_WRAP_S, GL_REPEAT)
+            glTextureParameteri(self._pick_texture, GL_TEXTURE_WRAP_T, GL_REPEAT)
+            glTextureParameteri(self._pick_texture, GL_TEXTURE_MIN_FILTER, GL_NEAREST)
+            glTextureParameteri(self._pick_texture, GL_TEXTURE_MAG_FILTER, GL_NEAREST)
+            glTextureStorage2D(
+                self._pick_texture,
+                1,
+                GL_RGBA32F,
+                self._num_tiles[0],
+                self._num_tiles[1]
+            )
+        
+        else:
+            
+            self._buffer_to_image_program = _BUFFER_TO_IMAGE.get(
+                TILE_SIZE=self._tile_size
+            )
+
+            self._tile_texture_buffer_size = (
+                self._num_tiles[0] * self._num_tiles[1]
+                 * 4 * 4
+            )
+            self._full_res_texture_buffer_size = (
+                self._num_tiles[0] * self._tile_size
+                * self._num_tiles[1] * self._tile_size
+                * 4
+            )
+
+            storage_buffer_ptrs = (ctypes.c_int * 4)()
+            glCreateBuffers(4, storage_buffer_ptrs)
+            self._pick_buffer = storage_buffer_ptrs[0]
+            self._energy_buffer = storage_buffer_ptrs[1]
+            self._value_buffer = storage_buffer_ptrs[2]
+            self._buffer_to_image_params = storage_buffer_ptrs[3]
+
+            glNamedBufferStorage(
+                self._pick_buffer,
+                self._tile_texture_buffer_size,
+                None,
+                0
+            )
+
+            glNamedBufferStorage(
+                self._energy_buffer,
+                self._full_res_texture_buffer_size,
+                None,
+                0
+            )
+
+            glNamedBufferStorage(
+                self._value_buffer,
+                self._full_res_texture_buffer_size,
+                None,
+                0
+            )
+
+            buffer_to_image_params_data = numpy.array(
+                [
+                    self._num_tiles[0],
+                    self._num_tiles[1],
+                    0,
+                    0,
+                ],
+                dtype=numpy.int32
+            ).tobytes()
+
+            glNamedBufferStorage(
+                self._buffer_to_image_params,
+                len(buffer_to_image_params_data),
+                buffer_to_image_params_data,
+                0
+            )
+
+            buffer_to_image_fb_target = viewport.FramebufferTarget(
+                GL_R32F,
+                True,
+                custom_texture_settings={
+                    GL_TEXTURE_WRAP_S: GL_REPEAT,
+                    GL_TEXTURE_WRAP_T: GL_REPEAT,
+                    GL_TEXTURE_MIN_FILTER: GL_NEAREST,
+                    GL_TEXTURE_MAG_FILTER: GL_NEAREST,
+                }
+            )
+            self._buffer_to_image_fb = viewport.Framebuffer(
+                    (buffer_to_image_fb_target,),
+                    self._texture_size[0],
+                    self._texture_size[1]
+                )
+            self._value_texture = (
+                buffer_to_image_fb_target.texture
+            )
+
 
         self._fft2_p1_program = _GEN_FFT2_P1.get(EXTRACT_RED=1)
         self._fft2_p2_program = _GEN_FFT2_P2.get(OUTPUT_LENGTH=1)
@@ -292,11 +387,44 @@ class Renderer(object):
     def _draw(self, wnd):
 
         if self._iteration == 0:
-            clear_value = numpy.array([0, 0, 0, 0], dtype=numpy.float32)
-            glClearTexImage(self._energy_texture, 0, GL_RGBA, GL_FLOAT, clear_value)
-            glClearTexImage(self._value_texture, 0, GL_RGBA, GL_FLOAT, clear_value)
-            glClearTexImage(self._pick_texture, 0, GL_RGBA, GL_FLOAT, clear_value)
 
+            clear_value = numpy.array([0, 0, 0, 0], dtype=numpy.float32)
+            
+            if self._use_storage_images:
+                glClearTexImage(self._energy_texture, 0, GL_RGBA, GL_FLOAT, clear_value)
+                glClearTexImage(self._value_texture, 0, GL_RGBA, GL_FLOAT, clear_value)
+                glClearTexImage(self._pick_texture, 0, GL_RGBA, GL_FLOAT, clear_value)
+
+            else:
+                glClearNamedBufferSubData(
+                    self._pick_buffer,
+                    GL_RGBA32F,
+                    0,
+                    self._tile_texture_buffer_size,
+                    GL_RGBA,
+                    GL_FLOAT,
+                    clear_value
+                )
+                glClearNamedBufferSubData(
+                    self._energy_buffer,
+                    GL_R32F,
+                    0,
+                    self._full_res_texture_buffer_size,
+                    GL_RED,
+                    GL_FLOAT,
+                    clear_value
+                )
+                glClearNamedBufferSubData(
+                    self._value_buffer,
+                    GL_R32F,
+                    0,
+                    self._full_res_texture_buffer_size,
+                    GL_RED,
+                    GL_FLOAT,
+                    clear_value
+                )
+
+        glMemoryBarrier(GL_UNIFORM_BARRIER_BIT)
 
         for iteration_index in range(self._max_iterations_per_frame):
             
@@ -365,22 +493,44 @@ class Renderer(object):
 
                 glUseProgram(self._void_and_cluster_update_energy_program)
                 glBindBufferBase(GL_UNIFORM_BUFFER, 0, target_buffer)
-                glBindImageTexture(1, self._energy_texture, 0, 0, 0, GL_READ_WRITE, GL_R32F)
-                glBindImageTexture(2, self._pick_texture, 0, 0, 0, GL_READ_ONLY, GL_RGBA32F)
+                if self._use_storage_images:
+                    glBindImageTexture(1, self._energy_texture, 0, 0, 0, GL_READ_WRITE, GL_R32F)
+                    glBindImageTexture(2, self._pick_texture, 0, 0, 0, GL_READ_ONLY, GL_RGBA32F)
+                else:
+                    glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 1, self._energy_buffer)
+                    glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 2, self._pick_buffer)
                 glDispatchCompute(self._num_tiles[0]//2, self._num_tiles[1]//2, 1)
 
-                glMemoryBarrier(GL_SHADER_IMAGE_ACCESS_BARRIER_BIT)
+                glMemoryBarrier(GL_SHADER_IMAGE_ACCESS_BARRIER_BIT | GL_SHADER_STORAGE_BARRIER_BIT)
 
                 glUseProgram(self._void_and_cluster_pick_program)
                 glBindBufferBase(GL_UNIFORM_BUFFER, 0, target_buffer)
-                glBindImageTexture(1, self._energy_texture, 0, 0, 0, GL_READ_ONLY, GL_R32F)
-                glBindImageTexture(2, self._value_texture, 0, 0, 0, GL_READ_WRITE, GL_R32F)
-                glBindImageTexture(3, self._pick_texture, 0, 0, 0, GL_WRITE_ONLY, GL_RGBA32F)
+                if self._use_storage_images:
+                    glBindImageTexture(1, self._energy_texture, 0, 0, 0, GL_READ_ONLY, GL_R32F)
+                    glBindImageTexture(2, self._value_texture, 0, 0, 0, GL_READ_WRITE, GL_R32F)
+                    glBindImageTexture(3, self._pick_texture, 0, 0, 0, GL_WRITE_ONLY, GL_RGBA32F)
+                else:
+                    glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 1, self._energy_buffer)
+                    glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 2, self._value_buffer)
+                    glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 3, self._pick_buffer)
                 glDispatchCompute(self._num_tiles[0]//2, self._num_tiles[1]//2, 1)
                 
-                glMemoryBarrier(GL_SHADER_IMAGE_ACCESS_BARRIER_BIT)
+                glMemoryBarrier(GL_SHADER_IMAGE_ACCESS_BARRIER_BIT | GL_SHADER_STORAGE_BARRIER_BIT)
 
-            glMemoryBarrier(GL_SHADER_IMAGE_ACCESS_BARRIER_BIT)
+            glMemoryBarrier(GL_SHADER_IMAGE_ACCESS_BARRIER_BIT | GL_SHADER_STORAGE_BARRIER_BIT)
+
+
+        if not self._use_storage_images:
+            glViewport(0, 0, self._texture_size[0], self._texture_size[1])
+            with self._buffer_to_image_fb.bind():
+                glUseProgram(self._buffer_to_image_program)
+                glBindBufferBase(GL_UNIFORM_BUFFER, 0, self._buffer_to_image_params)
+                glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 1, self._value_buffer)
+                try:
+                    glDrawArrays(GL_TRIANGLES, 0, 3)
+                except Exception as e:
+                    print(e)
+
 
         if (self._fft2_preview or self._storing_pixels) and not self._fft2_valid:
             self._fft2_valid = True

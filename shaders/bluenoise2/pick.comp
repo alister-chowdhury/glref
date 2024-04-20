@@ -10,9 +10,9 @@ layout(binding = 0) uniform TileUpdateDataPacked_
     TileUpdateDataPacked tileUpdateDataPacked;
 };
 
-readonly  layout(binding=1, r32f)     uniform image2D energy;
-          layout(binding=2, r32f)     uniform image2D inOutBNValue;
-writeonly layout(binding=3, rgba32f)  uniform image2D outTilePicks;
+readonly  IMAGESTORAGE_R32f(1, energy);
+          IMAGESTORAGE_R32f(2, inOutBNValue);
+writeonly IMAGESTORAGE_RGBA32f(3, outTilePicks);
 
 
 uint simpleHash32(uvec3 Seed)

@@ -15,8 +15,9 @@ layout(binding = 0) uniform TileUpdateDataPacked_
     TileUpdateDataPacked tileUpdateDataPacked;
 };
 
-layout(binding=1, r32f)             uniform image2D inOutEnergy;
-readonly layout(binding=2, rgba32f) uniform image2D tilePicks;
+         IMAGESTORAGE_R32f(1, inOutEnergy);
+readonly IMAGESTORAGE_RGBA32f(2, tilePicks);
+
 
 void main()
 {
