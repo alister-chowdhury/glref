@@ -5,6 +5,19 @@
 #define TILE_SIZE 8
 #endif // TILE_SIZE
 
+
+// The dispatch sizes are based around hitting 64 threads,
+// there is no reason this couldn't be lowered, but there
+// is no obvious benefit to doing this, since quality
+// would be awful.
+#if TILE_SIZE < 8
+#error "TILE_SIZE must be greater than 8"
+#endif // TILE_SIZE
+
+#if (TILE_SIZE & (TILE_SIZE - 1)) != 0
+#error "TILE_SIZE must be a power of 2"
+#endif // TILE_SIZE
+
 #ifndef USE_IMAGE_BUFFERS
 #define USE_IMAGE_BUFFERS 1
 #endif // USE_IMAGE_BUFFERS

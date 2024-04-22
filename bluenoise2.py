@@ -78,6 +78,8 @@ class Renderer(object):
         self._iteration = 0
         self._max_iterations_for_all_passes = self._tile_size * self._tile_size
 
+        if (self._num_tiles[0] & 1) or (self._num_tiles[1] & 1):
+            raise ValueError("Bad num tiles, must be aligned to 2")
 
         # We can quite comftably do an entire pass in a single frame
         self._max_iterations_per_frame = max(
@@ -89,6 +91,15 @@ class Renderer(object):
             )
         )
 
+
+        self._dispatch_update_sizes = (
+            (self._num_tiles[0] * self._tile_size) // 16,
+            (self._num_tiles[1] * self._tile_size) // 16
+        )
+        self._dispatch_pick_sizes = (
+            self._num_tiles[0] // 2,
+            self._num_tiles[1] // 2
+        )
 
         self._texture_size = (self._num_tiles[0] * self._tile_size, self._num_tiles[1] * self._tile_size)
         self._sigma = 1.9
@@ -499,7 +510,7 @@ class Renderer(object):
                 else:
                     glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 1, self._energy_buffer)
                     glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 2, self._pick_buffer)
-                glDispatchCompute(self._num_tiles[0]//2, self._num_tiles[1]//2, 1)
+                glDispatchCompute(self._dispatch_update_sizes[0], self._dispatch_update_sizes[1], 1)
 
                 glMemoryBarrier(GL_SHADER_IMAGE_ACCESS_BARRIER_BIT | GL_SHADER_STORAGE_BARRIER_BIT)
 
